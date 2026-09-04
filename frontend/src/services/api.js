@@ -118,6 +118,7 @@ export const api = {
   createProduct: async (productData) => request('/api/products', { method: 'POST', body: JSON.stringify(productData) }),
   updateProduct: async (id, productData) => request(`/api/products/${id}`, { method: 'PUT', body: JSON.stringify(productData) }),
   deleteProduct: async (id) => request(`/api/products/${id}`, { method: 'DELETE' }),
+  bulkDeleteProducts: async (ids = [], deleteAll = false) => request('/api/products/bulk-delete', { method: 'POST', body: JSON.stringify({ ids, deleteAll }) }),
   
   uploadPriceList: async (file) => {
     const formData = new FormData();

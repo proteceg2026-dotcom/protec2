@@ -444,8 +444,19 @@ class DatabaseDriver {
       return { changes: 1 };
     }
     if (lowerSql.includes('delete from products')) {
-      store.products = store.products.filter(p => String(p.id) !== String(params[0]));
-      return { changes: 1 };
+      if (lowerSql.includes('where ids in')) {
+        const idList = (params[0] || []).map(id => String(id));
+        const initialCount = store.products.length;
+        store.products = store.products.filter(p => !idList.includes(String(p.id)));
+        return { changes: initialCount - store.products.length };
+      } else if (lowerSql.includes('where id =')) {
+        store.products = store.products.filter(p => String(p.id) !== String(params[0]));
+        return { changes: 1 };
+      } else {
+        const count = store.products.length;
+        store.products = [];
+        return { changes: count };
+      }
     }
     if (lowerSql.includes('delete from customers')) {
       store.customers = store.customers.filter(c => String(c.id) !== String(params[0]));

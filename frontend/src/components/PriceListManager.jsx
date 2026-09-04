@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tag, Upload, Plus, Trash2, Search, FileSpreadsheet, FileText, CheckCircle2, AlertCircle, Edit } from 'lucide-react';
+import { Tag, Upload, Plus, Trash2, Search, FileSpreadsheet, FileText, CheckCircle2, AlertCircle, Edit, CheckSquare, Square, RefreshCw } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
@@ -8,6 +8,9 @@ export default function PriceListManager() {
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Selection state for Bulk Delete
+  const [selectedIds, setSelectedIds] = useState([]);
 
   // File Upload State
   const [selectedFile, setSelectedFile] = useState(null);
@@ -36,11 +39,59 @@ export default function PriceListManager() {
     setLoading(true);
     try {
       const res = await api.getProducts(search);
-      if (res.success) setProducts(res.products);
+      if (res.success) {
+        setProducts(res.products);
+        setSelectedIds([]); // reset selection
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Toggle selection of single product
+  const toggleSelect = (id) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  // Select all / Unselect all
+  const toggleSelectAll = () => {
+    if (selectedIds.length === products.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(products.map(p => p.id));
+    }
+  };
+
+  // Bulk delete selected products
+  const handleBulkDeleteSelected = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`هل أنت تأكد من حذف ${selectedIds.length} منتج محدد من قائمة الأسعار؟`)) return;
+
+    try {
+      const res = await api.bulkDeleteProducts(selectedIds, false);
+      if (res.success) {
+        fetchProducts();
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // Clear all products in catalog
+  const handleClearAllCatalog = async () => {
+    if (!window.confirm('⚠️ تحذير: هل أنت تأكد من مسح جميع المنتجات الموجودة في لستة الأسعار بالكامل؟')) return;
+
+    try {
+      const res = await api.bulkDeleteProducts([], true);
+      if (res.success) {
+        fetchProducts();
+      }
+    } catch (err) {
+      alert(err.message);
     }
   };
 
@@ -134,7 +185,7 @@ export default function PriceListManager() {
           </div>
           <div>
             <h3 style={{ fontSize: '1.2rem' }}>لستة الأسعار والمنتجات (Price List Catalog)</h3>
-            <p style={{ fontSize: '0.85rem' }}>إدارة وتحديث قوائم الأسعار برفع ملفات Excel / PDF أو الإضافة اليدوية</p>
+            <p style={{ fontSize: '0.85rem' }}>إدارة وتحديث قوائم الأسعار برفع ملفات Excel / PDF أو الإضافة والحذف المجمع</p>
           </div>
         </div>
 
@@ -190,9 +241,11 @@ export default function PriceListManager() {
         )}
       </div>
 
-      {/* Product Table */}
+      {/* Product Table & Bulk Action Bar */}
       <div className="glass-panel" style={{ padding: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        
+        {/* Search & Actions Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <div style={{ position: 'relative', width: '300px' }}>
             <input
               type="text"
@@ -205,10 +258,54 @@ export default function PriceListManager() {
             <Search size={16} style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
           </div>
 
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            إجمالي المنتجات: <strong>{products.length}</strong>
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              إجمالي المنتجات: <strong>{products.length}</strong>
+            </span>
+
+            {products.length > 0 && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={handleClearAllCatalog}
+                title="مسح جميع المنتجات في الكتالوج بالكامل"
+              >
+                <Trash2 size={15} />
+                <span>مسح القائمة بالكامل</span>
+              </button>
+            )}
+          </div>
         </div>
+
+        {/* Bulk Action Bar (Appears when items are selected) */}
+        {selectedIds.length > 0 && (
+          <div style={{
+            padding: '12px 18px',
+            borderRadius: '10px',
+            background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.2))',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            animation: 'fadeIn 0.2s ease'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontWeight: 'bold', color: '#fff', fontSize: '0.95rem' }}>
+                تم تحديد ({selectedIds.length}) منتج من لستة الأسعار
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="btn btn-danger btn-sm" onClick={handleBulkDeleteSelected}>
+                <Trash2 size={16} />
+                <span>حذف المنتجات المحددة ({selectedIds.length})</span>
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setSelectedIds([])}>
+                إلغاء التحديد
+              </button>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>جاري تحميل المنتجات...</div>
@@ -217,6 +314,15 @@ export default function PriceListManager() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'right' }}>
+                  <th style={{ padding: '12px', width: '40px' }}>
+                    <input
+                      type="checkbox"
+                      checked={products.length > 0 && selectedIds.length === products.length}
+                      onChange={toggleSelectAll}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                      title="تحديد الكل"
+                    />
+                  </th>
                   <th style={{ padding: '12px' }}>الكود (SKU)</th>
                   <th style={{ padding: '12px' }}>اسم المنتج</th>
                   <th style={{ padding: '12px' }}>القسم</th>
@@ -226,30 +332,47 @@ export default function PriceListManager() {
                 </tr>
               </thead>
               <tbody>
-                {products.map(p => (
-                  <tr key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <td style={{ padding: '12px', fontWeight: 'bold', color: '#60a5fa' }}>{p.code}</td>
-                    <td style={{ padding: '12px' }}>
-                      <strong>{p.name}</strong>
-                      {p.description && <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{p.description}</p>}
-                    </td>
-                    <td style={{ padding: '12px', color: 'var(--text-muted)' }}>{p.category}</td>
-                    <td style={{ padding: '12px', fontWeight: 'bold', color: '#34d399' }}>
-                      {p.unit_price.toLocaleString()} {p.currency || 'EGP'}
-                    </td>
-                    <td style={{ padding: '12px' }}>{p.stock_quantity} قطعة</td>
-                    <td style={{ padding: '12px' }}>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <button onClick={() => handleOpenEditModal(p)} style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer' }}>
-                          <Edit size={16} />
-                        </button>
-                        <button onClick={() => handleDeleteProduct(p.id)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}>
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {products.map(p => {
+                  const isSelected = selectedIds.includes(p.id);
+                  return (
+                    <tr
+                      key={p.id}
+                      style={{
+                        borderBottom: '1px solid rgba(255,255,255,0.05)',
+                        background: isSelected ? 'rgba(59, 130, 246, 0.1)' : 'transparent'
+                      }}
+                    >
+                      <td style={{ padding: '12px' }}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelect(p.id)}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                      </td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#60a5fa' }}>{p.code}</td>
+                      <td style={{ padding: '12px' }}>
+                        <strong>{p.name}</strong>
+                        {p.description && <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{p.description}</p>}
+                      </td>
+                      <td style={{ padding: '12px', color: 'var(--text-muted)' }}>{p.category}</td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#34d399' }}>
+                        {p.unit_price.toLocaleString()} {p.currency || 'EGP'}
+                      </td>
+                      <td style={{ padding: '12px' }}>{p.stock_quantity} قطعة</td>
+                      <td style={{ padding: '12px' }}>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button onClick={() => handleOpenEditModal(p)} style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer' }}>
+                            <Edit size={16} />
+                          </button>
+                          <button onClick={() => handleDeleteProduct(p.id)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}>
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

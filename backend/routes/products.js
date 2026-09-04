@@ -117,6 +117,25 @@ router.delete('/:id', authenticateToken, (req, res) => {
   });
 });
 
+// Bulk Delete Products
+router.post('/bulk-delete', authenticateToken, (req, res) => {
+  const { ids, deleteAll } = req.body;
+
+  if (deleteAll) {
+    db.run("DELETE FROM products", [], function (err) {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+      res.json({ success: true, message: 'تم مسح كافة المنتجات في لستة الأسعار بنجاح' });
+    });
+  } else if (Array.isArray(ids) && ids.length > 0) {
+    db.run("DELETE FROM products WHERE ids IN (?)", [ids], function (err) {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+      res.json({ success: true, message: `تم حذف ${ids.length} منتج بنجاح` });
+    });
+  } else {
+    res.status(400).json({ success: false, message: 'لم يتم تحديد منتجات للحذف' });
+  }
+});
+
 // Upload price list (Excel / CSV / PDF)
 router.post('/upload-pricelist', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) {
