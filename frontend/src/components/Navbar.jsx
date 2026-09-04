@@ -81,7 +81,6 @@ export default function Navbar({ activeTab, setActiveTab, onOpenServerModal, onO
                   borderRadius: '10px',
                   fontSize: '0.9rem',
                   fontWeight: '600',
-                  border: 'none',
                   cursor: 'pointer',
                   background: isActive ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(99, 102, 241, 0.2))' : 'transparent',
                   color: isActive ? '#60a5fa' : 'var(--text-muted)',

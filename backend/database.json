@@ -1,0 +1,147 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "password": "$2a$10$2lPRshW6cGgp8SKUBfLSZOjtsDUFCKH2RYJvPCxQ2LgbXbE1kx2.K",
+      "name": "مدير النظام الرئيسي",
+      "role": "admin",
+      "max_discount_percent": 100,
+      "can_approve": 1,
+      "can_upload_price": 1,
+      "created_at": "2026-09-04T18:39:05.347Z"
+    },
+    {
+      "id": 2,
+      "username": "emp1",
+      "password": "$2a$10$1U8dF0idE4dl1GJqlWbXa.DvnukASs47loBh5brDoGQ0YGFQpuhW2",
+      "name": "أحمد محمود (مبيعات)",
+      "role": "sales",
+      "max_discount_percent": 15,
+      "can_approve": 0,
+      "can_upload_price": 0,
+      "created_at": "2026-09-04T18:39:05.349Z"
+    }
+  ],
+  "products": [
+    {
+      "id": 1,
+      "code": "PRD-101",
+      "name": "مولد كهربائي 50 كيلو واط",
+      "description": "مولد ديزل كاتربيلر كات 50 KVA صامت",
+      "category": "المولدات",
+      "unit_price": 125000,
+      "min_price": 110000,
+      "stock_quantity": 8,
+      "currency": "EGP",
+      "updated_at": "2026-09-04T18:39:05.349Z"
+    },
+    {
+      "id": 2,
+      "code": "PRD-102",
+      "name": "محول كهربائي 100 KVA",
+      "description": "محول خفض جهد ثلاثي الأوجه",
+      "category": "المحولات",
+      "unit_price": 85000,
+      "min_price": 78000,
+      "stock_quantity": 15,
+      "currency": "EGP",
+      "updated_at": "2026-09-04T18:39:05.349Z"
+    },
+    {
+      "id": 3,
+      "code": "PRD-103",
+      "name": "كابل مسلح 4x16 ملم (100 متر)",
+      "description": "كابل نحاس مسلّح عالي الجودة متوافق مع الكود المصري",
+      "category": "الكابلات",
+      "unit_price": 14500,
+      "min_price": 13000,
+      "stock_quantity": 50,
+      "currency": "EGP",
+      "updated_at": "2026-09-04T18:39:05.349Z"
+    },
+    {
+      "id": 4,
+      "code": "PRD-104",
+      "name": "لوحة تحكم ATS أتوماتيك 250A",
+      "description": "لوحة نقل القدرة التلقائية للمولدات",
+      "category": "لوحات التحكم",
+      "unit_price": 32000,
+      "min_price": 29000,
+      "stock_quantity": 12,
+      "currency": "EGP",
+      "updated_at": "2026-09-04T18:39:05.349Z"
+    },
+    {
+      "id": 5,
+      "code": "PRD-105",
+      "name": "بطارية مولد 12V 100Ah",
+      "description": "بطارية جافة عالية الاعتمادية للمولدات",
+      "category": "إكسسوارات",
+      "unit_price": 4800,
+      "min_price": 4200,
+      "stock_quantity": 100,
+      "currency": "EGP",
+      "updated_at": "2026-09-04T18:39:05.349Z"
+    },
+    {
+      "id": 6,
+      "code": "PRD-106",
+      "name": "قاطع كهربائي ثلاثي 400A Schneider",
+      "description": "قاطع تيار مدمج عالي الجودة",
+      "category": "المقاطعات",
+      "unit_price": 18500,
+      "min_price": 16800,
+      "stock_quantity": 25,
+      "currency": "EGP",
+      "updated_at": "2026-09-04T18:39:05.350Z"
+    }
+  ],
+  "customers": [
+    {
+      "id": 1,
+      "name": "شركة الأمل للمقاولات",
+      "company": "شركة الأمل ش.م.م",
+      "phone": "01012345678",
+      "email": "info@alamal-const.com",
+      "address": "القاهرة - التجمع الخامس",
+      "tax_id": "123-456-789",
+      "status": "active",
+      "notes": "عميل مميز - مشاريع إنشائية كبيرة",
+      "created_at": "2026-09-04T18:39:05.350Z"
+    },
+    {
+      "id": 2,
+      "name": "مؤسسة النور للإلكترونيات",
+      "company": "مؤسسة النور التجاري",
+      "phone": "01198765432",
+      "email": "sales@alnoor-eg.com",
+      "address": "الجيزة - شارع الهرم",
+      "tax_id": "987-654-321",
+      "status": "contacted",
+      "notes": "مهتم بمولدات الكهرباء للمصانع",
+      "created_at": "2026-09-04T18:39:05.350Z"
+    },
+    {
+      "id": 3,
+      "name": "المصرية للتطوير العقاري",
+      "company": "المصرية للتعمير",
+      "phone": "01255554444",
+      "email": "contact@egy-dev.com",
+      "address": "الإسكندرية - سموحة",
+      "tax_id": "456-789-123",
+      "status": "lead",
+      "notes": "طلب استفسار عن أسعار الكابلات المسلحة",
+      "created_at": "2026-09-04T18:39:05.350Z"
+    }
+  ],
+  "quotes": [],
+  "activity_logs": [],
+  "autoIds": {
+    "users": 3,
+    "products": 7,
+    "customers": 4,
+    "quotes": 1,
+    "activity_logs": 1
+  }
+}
