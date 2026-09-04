@@ -324,14 +324,14 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
           </div>
         </div>
 
-        {/* AI Document Upload Button */}
+        {/* AI Document & Image Upload Button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <label className="btn btn-accent btn-sm" style={{ cursor: 'pointer' }}>
             <Sparkles size={16} />
-            <span>{parsingFile ? 'جاري تحليل الملف...' : '📁 رفع طلب/ملف العميل بالذكاء الاصطناعي'}</span>
+            <span>{parsingFile ? 'جاري تحليل المستند/الصورة بالذكاء الاصطناعي...' : '📁 رفع مستند أو صورة طلب العميل (PDF, Images, Excel)'}</span>
             <input
               type="file"
-              accept=".pdf, .xlsx, .xls, .csv, .txt"
+              accept=".pdf, .xlsx, .xls, .csv, .txt, .png, .jpg, .jpeg, .webp, .bmp"
               onChange={handleAIFileUploadToQuote}
               style={{ display: 'none' }}
               disabled={parsingFile}

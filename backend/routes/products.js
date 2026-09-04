@@ -16,6 +16,53 @@ if (!fs.existsSync(path.join(__dirname, '../uploads/'))) {
   fs.mkdirSync(path.join(__dirname, '../uploads/'), { recursive: true });
 }
 
+// Download Standard Excel Template
+router.get('/download-template', (req, res) => {
+  try {
+    const templateData = [
+      {
+        'كود_المنتج': 'PRD-101',
+        'اسم_المنتج': 'مولد كهربائي 50 كيلو واط كاتربيلر',
+        'العائلة_القسم': 'المولدات',
+        'السعر_الأساسي': 125000,
+        'نسبة_الخصم_العائلة_%': 12,
+        'الكمية_المتاحة': 10,
+        'شروط_وملاحظات_الخصم': 'خصم خاص لعائلة المولدات الكهربائية'
+      },
+      {
+        'كود_المنتج': 'PRD-102',
+        'اسم_المنتج': 'كابل نحاس مسلح 4x16 ملم (100 متر)',
+        'العائلة_القسم': 'الكابلات',
+        'السعر_الأساسي': 14500,
+        'نسبة_الخصم_العائلة_%': 5,
+        'الكمية_المتاحة': 50,
+        'شروط_وملاحظات_الخصم': 'خصم توريدات الكابلات'
+      },
+      {
+        'كود_المنتج': 'PRD-103',
+        'اسم_المنتج': 'لوحة تحكم ATS أتوماتيك 250A',
+        'العائلة_القسم': 'لوحات التحكم',
+        'السعر_الأساسي': 32000,
+        'نسبة_الخصم_العائلة_%': 8,
+        'الكمية_المتاحة': 15,
+        'شروط_وملاحظات_الخصم': 'خصم لوحات التحكم'
+      }
+    ];
+
+    const ws = xlsx.utils.json_to_sheet(templateData);
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, 'لستة_الأسعار_والخصومات');
+
+    const buffer = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="ProTec_PriceList_Discount_Template.xlsx"');
+    res.send(buffer);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'خطأ أثناء إنشاء نموذج الإكسيل: ' + err.message });
+  }
+});
+
 // Get all / search products
 router.get('/', authenticateToken, (req, res) => {
   const { search, category } = req.query;
@@ -167,19 +214,19 @@ router.delete('/discount-rules/:id', authenticateToken, (req, res) => {
   });
 });
 
-// Upload price list (Excel / CSV / PDF)
+// Upload price list & discount policy (Excel / CSV / PDF)
 router.post('/upload-pricelist', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ success: false, message: 'يرجى اختيار ملف لستة الأسعار' });
+    return res.status(400).json({ success: false, message: 'يرجى اختيار ملف لستة الأسعار والخصومات' });
   }
 
   const filePath = req.file.path;
   const originalName = req.file.originalname.toLowerCase();
   let importedItems = [];
+  let familyDiscountRules = [];
 
   try {
     if (originalName.endsWith('.xlsx') || originalName.endsWith('.xls') || originalName.endsWith('.csv')) {
-      // Parse Excel or CSV
       const workbook = xlsx.readFile(filePath);
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
@@ -190,17 +237,17 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         return res.status(400).json({ success: false, message: 'الملف فارغ أو لا يحتوي على صفوف بيانات' });
       }
 
-      // Try to detect headers or standard positions
-      // Headers expected: Code/كود , Name/الاسم , Price/السعر , Category/القسم , Stock/الكمية
-      let codeIdx = 0, nameIdx = 1, priceIdx = 2, catIdx = 3, stockIdx = 4;
+      let codeIdx = 0, nameIdx = 1, catIdx = 2, priceIdx = 3, discIdx = 4, stockIdx = 5, termsIdx = 6;
 
       const headerRow = data[0].map(c => String(c).toLowerCase());
       headerRow.forEach((col, idx) => {
         if (col.includes('كود') || col.includes('code') || col.includes('sku')) codeIdx = idx;
         if (col.includes('اسم') || col.includes('name') || col.includes('منتج')) nameIdx = idx;
+        if (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category')) catIdx = idx;
         if (col.includes('سعر') || col.includes('price') || col.includes('مبلغ')) priceIdx = idx;
-        if (col.includes('قسم') || col.includes('تصنيف') || col.includes('category')) catIdx = idx;
+        if (col.includes('خصم') || col.includes('disc') || col.includes('discount')) discIdx = idx;
         if (col.includes('كمية') || col.includes('مخزون') || col.includes('stock')) stockIdx = idx;
+        if (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note')) termsIdx = idx;
       });
 
       for (let i = 1; i < data.length; i++) {
@@ -209,16 +256,26 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
         const code = row[codeIdx] ? String(row[codeIdx]).trim() : `PRD-${Date.now()}-${i}`;
         const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
-        const price = row[priceIdx] ? parseFloat(row[priceIdx]) : 0;
         const category = row[catIdx] ? String(row[catIdx]).trim() : 'عام';
+        const price = row[priceIdx] ? parseFloat(row[priceIdx]) : 0;
+        const discount = row[discIdx] ? parseFloat(row[discIdx]) : 0;
         const stock = row[stockIdx] ? parseInt(row[stockIdx]) : 10;
+        const terms = row[termsIdx] ? String(row[termsIdx]).trim() : '';
 
         if (name && !isNaN(price) && price > 0) {
           importedItems.push({ code, name, unit_price: price, category, stock_quantity: stock });
+          
+          if (discount > 0) {
+            familyDiscountRules.push({
+              target: category,
+              min_quantity: 1,
+              discount_percent: discount,
+              terms: terms || `خصم عائلة ${category} تلقائي`
+            });
+          }
         }
       }
     } else if (originalName.endsWith('.pdf')) {
-      // Parse PDF
       const dataBuffer = fs.readFileSync(filePath);
       const pdfData = await pdfParse(dataBuffer);
       const lines = pdfData.text.split('\n');
@@ -228,8 +285,6 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         line = line.trim();
         if (!line) continue;
         
-        // Regex pattern to extract price numbers and product text
-        // Example line: "PRD-201 كابل كهرباء 500 EGP"
         const matches = line.match(/([A-Z0-9_-]+)?\s*([^\d]+)\s+([\d,.]+)/i);
         if (matches) {
           const code = matches[1] ? matches[1].trim() : `PDF-${counter++}`;
@@ -241,18 +296,14 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
               code: code.toUpperCase(),
               name,
               unit_price: price,
-              category: 'مستورد من PDF',
+              category: 'عام',
               stock_quantity: 10
             });
           }
         }
       }
-    } else {
-      fs.unlinkSync(filePath);
-      return res.status(400).json({ success: false, message: 'امتداد الملف غير مدعوم. يرجى رفع ملف إكسيل أو CSV أو PDF' });
     }
 
-    // Clean temp file
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
     if (importedItems.length === 0) {
@@ -260,9 +311,6 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
     }
 
     // Upsert items into DB
-    let insertedCount = 0;
-    let updatedCount = 0;
-
     const stmtUpsert = db.prepare(`
       INSERT INTO products (code, name, unit_price, category, stock_quantity)
       VALUES (?, ?, ?, ?, ?)
@@ -279,12 +327,21 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         stmtUpsert.run([item.code, item.name, item.unit_price, item.category, item.stock_quantity]);
       });
       stmtUpsert.finalize();
+
+      // Upsert Family Discount Rules
+      familyDiscountRules.forEach(rule => {
+        db.run(
+          "INSERT INTO discount_rules (target, min_quantity, discount_percent, terms) VALUES (?, ?, ?, ?)",
+          [rule.target, rule.min_quantity, rule.discount_percent, rule.terms]
+        );
+      });
     });
 
     res.json({
       success: true,
-      message: `تم رفع واستيراد ${importedItems.length} منتج بنجاح من لستة الأسعار!`,
-      importedCount: importedItems.length
+      message: `تم استيراد ${importedItems.length} منتج وحفظ ${familyDiscountRules.length} شرط خصم عائلة بنجاح من الملف القياسي!`,
+      importedCount: importedItems.length,
+      rulesCount: familyDiscountRules.length
     });
 
   } catch (error) {
