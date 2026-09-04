@@ -315,38 +315,58 @@ class DatabaseDriver {
     // INSERT INTO PRODUCTS
     if (lowerSql.includes('insert into products')) {
       const code = params[0];
-      const existingIdx = store.products.findIndex(p => p.code === code);
+      const existingIdx = store.products.findIndex(p => p && p.code === code);
+
+      // Detect parameter positions based on query or param count
+      let name, description, category, unit_price, min_price, stock_quantity, currency;
+      
+      if (params.length >= 8) {
+        name = params[1];
+        description = params[2] || '';
+        category = params[3] || 'عام';
+        unit_price = parseFloat(params[4]) || 0;
+        min_price = parseFloat(params[5]) || 0;
+        stock_quantity = parseInt(params[6]) || 10;
+        currency = params[7] || 'EGP';
+      } else {
+        name = params[1];
+        unit_price = parseFloat(params[2]) || 0;
+        category = params[3] || 'عام';
+        stock_quantity = parseInt(params[4]) || 10;
+        description = '';
+        min_price = 0;
+        currency = 'EGP';
+      }
 
       if (existingIdx > -1) {
-        if (lowerSql.includes('on conflict')) {
-          store.products[existingIdx] = {
-            ...store.products[existingIdx],
-            name: params[1],
-            unit_price: params[2],
-            category: params[3],
-            stock_quantity: params[4],
-            updated_at: new Date().toISOString()
-          };
-          return { lastID: store.products[existingIdx].id, changes: 1 };
-        } else {
-          throw new Error('UNIQUE constraint failed: products.code');
-        }
+        store.products[existingIdx] = {
+          ...store.products[existingIdx],
+          code,
+          name,
+          category,
+          unit_price,
+          stock_quantity,
+          updated_at: new Date().toISOString()
+        };
+        saveStore();
+        return { lastID: store.products[existingIdx].id, changes: 1 };
       }
 
       const id = store.autoIds.products++;
       const newProd = {
         id,
         code,
-        name: params[1],
-        description: params[2] || '',
-        category: params[3] || 'عام',
-        unit_price: params[4],
-        min_price: params[5] || 0,
-        stock_quantity: params[6] || 10,
-        currency: params[7] || 'EGP',
+        name,
+        description,
+        category,
+        unit_price,
+        min_price,
+        stock_quantity,
+        currency,
         updated_at: new Date().toISOString()
       };
       store.products.push(newProd);
+      saveStore();
       return { lastID: id, changes: 1 };
     }
 

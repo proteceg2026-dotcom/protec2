@@ -257,13 +257,27 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         const code = row[codeIdx] ? String(row[codeIdx]).trim() : `PRD-${Date.now()}-${i}`;
         const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
         const category = row[catIdx] ? String(row[catIdx]).trim() : 'عام';
-        const price = row[priceIdx] ? parseFloat(row[priceIdx]) : 0;
-        const discount = row[discIdx] ? parseFloat(row[discIdx]) : 0;
-        const stock = row[stockIdx] ? parseInt(row[stockIdx]) : 10;
+        
+        let priceVal = 0;
+        if (row[priceIdx] !== undefined && row[priceIdx] !== null) {
+          const rawPrice = String(row[priceIdx]).replace(/,/g, '').replace(/[^\d.]/g, '');
+          priceVal = parseFloat(rawPrice) || 0;
+        }
+
+        let discount = 0;
+        if (row[discIdx] !== undefined && row[discIdx] !== null) {
+          discount = parseFloat(String(row[discIdx]).replace(/[^\d.]/g, '')) || 0;
+        }
+
+        let stock = 10;
+        if (row[stockIdx] !== undefined && row[stockIdx] !== null) {
+          stock = parseInt(String(row[stockIdx]).replace(/[^\d]/g, '')) || 10;
+        }
+
         const terms = row[termsIdx] ? String(row[termsIdx]).trim() : '';
 
-        if (name && !isNaN(price) && price > 0) {
-          importedItems.push({ code, name, unit_price: price, category, stock_quantity: stock });
+        if (name && name.trim() !== '') {
+          importedItems.push({ code, name, unit_price: priceVal, category, stock_quantity: stock });
           
           if (discount > 0) {
             familyDiscountRules.push({
