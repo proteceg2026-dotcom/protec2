@@ -120,6 +120,11 @@ export const api = {
   deleteProduct: async (id) => request(`/api/products/${id}`, { method: 'DELETE' }),
   bulkDeleteProducts: async (ids = [], deleteAll = false) => request('/api/products/bulk-delete', { method: 'POST', body: JSON.stringify({ ids, deleteAll }) }),
   
+  // Discount Policy Rules
+  getDiscountRules: async () => request('/api/products/discount-rules'),
+  createDiscountRule: async (ruleData) => request('/api/products/discount-rules', { method: 'POST', body: JSON.stringify(ruleData) }),
+  deleteDiscountRule: async (id) => request(`/api/products/discount-rules/${id}`, { method: 'DELETE' }),
+
   uploadPriceList: async (file) => {
     const formData = new FormData();
     formData.append('file', file);

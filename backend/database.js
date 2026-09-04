@@ -10,7 +10,8 @@ let store = {
   customers: [],
   quotes: [],
   activity_logs: [],
-  autoIds: { users: 1, products: 1, customers: 1, quotes: 1, activity_logs: 1 }
+  discount_rules: [],
+  autoIds: { users: 1, products: 1, customers: 1, quotes: 1, activity_logs: 1, discount_rules: 1 }
 };
 
 function loadStore() {
@@ -264,11 +265,31 @@ class DatabaseDriver {
       return list;
     }
 
+    // SELECT FROM DISCOUNT_RULES
+    if (lowerSql.includes('from discount_rules')) {
+      return [...store.discount_rules];
+    }
+
     return [];
   }
 
   _executeUpdate(sql, params) {
     const lowerSql = sql.toLowerCase();
+
+    // INSERT INTO DISCOUNT_RULES
+    if (lowerSql.includes('insert into discount_rules')) {
+      const id = store.autoIds.discount_rules++;
+      const newRule = {
+        id,
+        target: params[0], // Category or Product SKU
+        min_quantity: params[1] || 1,
+        discount_percent: params[2] || 0,
+        terms: params[3] || '',
+        created_at: new Date().toISOString()
+      };
+      store.discount_rules.push(newRule);
+      return { lastID: id, changes: 1 };
+    }
 
     // INSERT INTO USERS
     if (lowerSql.includes('insert into users')) {
@@ -439,6 +460,14 @@ class DatabaseDriver {
     }
 
     // DELETE STATEMENTS
+    if (lowerSql.includes('delete from discount_rules')) {
+      if (lowerSql.includes('where id = ?')) {
+        store.discount_rules = store.discount_rules.filter(r => String(r.id) !== String(params[0]));
+      } else {
+        store.discount_rules = [];
+      }
+      return { changes: 1 };
+    }
     if (lowerSql.includes('delete from users')) {
       store.users = store.users.filter(u => String(u.id) !== String(params[0]));
       return { changes: 1 };

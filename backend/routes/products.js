@@ -136,6 +136,37 @@ router.post('/bulk-delete', authenticateToken, (req, res) => {
   }
 });
 
+// Discount Rules Routes
+router.get('/discount-rules', authenticateToken, (req, res) => {
+  db.all("SELECT * FROM discount_rules ORDER BY id DESC", [], (err, rules) => {
+    if (err) return res.status(500).json({ success: false, message: err.message });
+    res.json({ success: true, rules: rules || [] });
+  });
+});
+
+router.post('/discount-rules', authenticateToken, (req, res) => {
+  const { target, min_quantity, discount_percent, terms } = req.body;
+  if (!target || discount_percent === undefined) {
+    return res.status(400).json({ success: false, message: 'اسم القسم/الكود ونسبة الخصم مطلوبان' });
+  }
+
+  db.run(
+    "INSERT INTO discount_rules (target, min_quantity, discount_percent, terms) VALUES (?, ?, ?, ?)",
+    [target.trim(), parseInt(min_quantity) || 1, parseFloat(discount_percent) || 0, terms || ''],
+    function (err) {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+      res.json({ success: true, message: 'تم إضافة شرط الخصم التلقائي بنجاح', ruleId: this.lastID });
+    }
+  );
+});
+
+router.delete('/discount-rules/:id', authenticateToken, (req, res) => {
+  db.run("DELETE FROM discount_rules WHERE id = ?", [req.params.id], function (err) {
+    if (err) return res.status(500).json({ success: false, message: err.message });
+    res.json({ success: true, message: 'تم حذف شرط الخصم' });
+  });
+});
+
 // Upload price list (Excel / CSV / PDF)
 router.post('/upload-pricelist', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) {

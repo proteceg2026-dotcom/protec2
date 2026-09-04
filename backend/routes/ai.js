@@ -161,4 +161,110 @@ router.post('/chat', authenticateToken, (req, res) => {
   });
 });
 
+const multer = require('multer');
+const xlsx = require('xlsx');
+const pdfParse = require('pdf-parse');
+const fs = require('fs');
+const path = require('path');
+
+const upload = multer({ dest: path.join(__dirname, '../uploads/') });
+
+// Smart AI File-to-Quote Converter Endpoint
+router.post('/parse-file-quote', authenticateToken, upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'يرجى اختيار ملف طلب أو عرض سعر' });
+  }
+
+  const filePath = req.file.path;
+  const originalName = req.file.originalname.toLowerCase();
+
+  try {
+    let extractedTextLines = [];
+
+    if (originalName.endsWith('.xlsx') || originalName.endsWith('.xls') || originalName.endsWith('.csv')) {
+      const workbook = xlsx.readFile(filePath);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
+      data.forEach(row => {
+        if (row && row.length > 0) {
+          const lineStr = row.join(' ').trim();
+          if (lineStr.length > 2) extractedTextLines.push(lineStr);
+        }
+      });
+    } else if (originalName.endsWith('.pdf')) {
+      const dataBuffer = fs.readFileSync(filePath);
+      const pdfData = await pdfParse(dataBuffer);
+      extractedTextLines = pdfData.text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+    } else {
+      const content = fs.readFileSync(filePath, 'utf8');
+      extractedTextLines = content.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+    }
+
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    if (extractedTextLines.length === 0) {
+      return res.status(400).json({ success: false, message: 'تعذر قراءة نصوص من الملف المرفق' });
+    }
+
+    // Fetch catalog products to match
+    db.all("SELECT * FROM products", [], (err, products) => {
+      if (err) return res.status(500).json({ success: false, message: err.message });
+
+      const parsedItems = [];
+
+      extractedTextLines.forEach((line, index) => {
+        // Skip common header words
+        if (/invoice|quotation|date|total|مبلغ|إجمالي|التاريخ|التفاصيل|عرض سعر/i.test(line)) return;
+
+        // Try SKU / Code or Name match
+        const lowerLine = line.toLowerCase();
+        let matchedProd = products.find(p => 
+          lowerLine.includes(p.code.toLowerCase()) || 
+          lowerLine.includes(p.name.toLowerCase())
+        );
+
+        // Try extracting quantity
+        const qtyMatch = line.match(/(?:عدد|كمية|بعدد)?\s*(\d+)/i);
+        const quantity = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+        if (matchedProd) {
+          parsedItems.push({
+            id: matchedProd.id,
+            code: matchedProd.code,
+            name: matchedProd.name,
+            unit_price: matchedProd.unit_price,
+            quantity: quantity > 0 ? quantity : 1,
+            item_discount_percent: 0,
+            isMatched: true,
+            notes: 'مطابق لكتالوج لستة الأسعار'
+          });
+        } else {
+          // Unmatched / Unclear item -> leave as manual pricing
+          parsedItems.push({
+            id: `manual-${Date.now()}-${index}`,
+            code: `MANUAL-${index + 1}`,
+            name: line.length > 60 ? line.slice(0, 60) + '...' : line,
+            unit_price: 0,
+            quantity: quantity > 0 ? quantity : 1,
+            item_discount_percent: 0,
+            isMatched: false,
+            isManual: true,
+            notes: '⚠️ بند غير واضح/خارج الكتالوج - يرجى التسعير وتحديد الخصم يدوياً'
+          });
+        }
+      });
+
+      res.json({
+        success: true,
+        message: `تم تحليل المستند بنجاح بالذكاء الاصطناعي وتحويله لـ ${parsedItems.length} بند بعرض السعر!`,
+        items: parsedItems
+      });
+    });
+
+  } catch (error) {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    res.status(500).json({ success: false, message: 'خطأ أثناء تحليل الملف بالذكاء الاصطناعي: ' + error.message });
+  }
+});
+
 module.exports = router;

@@ -9,7 +9,10 @@ import {
   Download, 
   Users, 
   Calculator,
-  Building
+  Upload,
+  Sparkles,
+  Percent,
+  HelpCircle
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -21,19 +24,21 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
   
   const [customers, setCustomers] = useState([]);
   const [products, setProducts] = useState([]);
+  const [discountRules, setDiscountRules] = useState([]);
   const [searchProductQuery, setSearchProductQuery] = useState('');
   
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
-  const [discountPercent, setDiscountPercent] = useState(0);
+  const [discountPercent, setDiscountPercent] = useState(0); // General Quote Discount
   const [notes, setNotes] = useState('');
   
   const [cartItems, setCartItems] = useState([]);
 
   const [loading, setLoading] = useState(false);
+  const [parsingFile, setParsingFile] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
 
-  // Load Customers & Products
+  // Load Customers, Products, & Discount Policy Rules
   useEffect(() => {
     loadData();
   }, []);
@@ -47,7 +52,9 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
         code: p.code,
         name: p.name,
         unit_price: p.unit_price,
-        quantity: prefilledDraft.quantity || 1
+        quantity: prefilledDraft.quantity || 1,
+        item_discount_percent: 0,
+        isMatched: true
       }]);
       if (prefilledDraft.discount_percent) {
         setDiscountPercent(prefilledDraft.discount_percent);
@@ -57,12 +64,14 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
 
   const loadData = async () => {
     try {
-      const [cRes, pRes] = await Promise.all([
+      const [cRes, pRes, rRes] = await Promise.all([
         api.getCustomers(),
-        api.getProducts()
+        api.getProducts(),
+        api.getDiscountRules()
       ]);
       if (cRes.success) setCustomers(cRes.customers);
       if (pRes.success) setProducts(pRes.products);
+      if (rRes.success) setDiscountRules(rRes.rules);
     } catch (err) {
       console.error(err);
     }
@@ -77,8 +86,19 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
     }
   };
 
+  // Find if automatic discount rule applies for product
+  const getAutoDiscountRule = (prod, qty) => {
+    const matchingRule = discountRules.find(r => 
+      (r.target.toLowerCase() === prod.code.toLowerCase() || r.target.toLowerCase() === (prod.category || '').toLowerCase()) &&
+      qty >= (r.min_quantity || 1)
+    );
+    return matchingRule ? matchingRule.discount_percent : 0;
+  };
+
   const handleAddProductToCart = (prod) => {
     const existingIdx = cartItems.findIndex(item => item.code === prod.code);
+    const autoDisc = getAutoDiscountRule(prod, 1);
+
     if (existingIdx > -1) {
       const updated = [...cartItems];
       updated[existingIdx].quantity += 1;
@@ -91,9 +111,54 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
           code: prod.code,
           name: prod.name,
           unit_price: prod.unit_price,
-          quantity: 1
+          quantity: 1,
+          item_discount_percent: autoDisc,
+          isMatched: true,
+          notes: autoDisc > 0 ? `خصم سياسة تلقائي: ${autoDisc}%` : ''
         }
       ]);
+    }
+  };
+
+  const handleAddManualCustomItem = () => {
+    setCartItems(prev => [
+      ...prev,
+      {
+        id: `manual-${Date.now()}`,
+        code: `MANUAL-${cartItems.length + 1}`,
+        name: 'بند جديد / يدوي',
+        unit_price: 0,
+        quantity: 1,
+        item_discount_percent: 0,
+        isMatched: false,
+        isManual: true,
+        notes: 'بند يدوي غير مدرج في الكتالوج'
+      }
+    ]);
+  };
+
+  // AI File Upload Parser
+  const handleAIFileUploadToQuote = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setParsingFile(true);
+    setStatusMsg(null);
+
+    try {
+      const res = await api.parseFileToQuote(file);
+      if (res.success && res.items) {
+        setCartItems(res.items);
+        setStatusMsg({
+          type: 'success',
+          text: res.message
+        });
+      }
+    } catch (err) {
+      setStatusMsg({ type: 'error', text: err.message });
+    } finally {
+      setParsingFile(false);
+      e.target.value = '';
     }
   };
 
@@ -108,9 +173,9 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
     setCartItems(updated);
   };
 
-  const handleUnitPriceChange = (index, newPrice) => {
+  const handleItemFieldChange = (index, field, value) => {
     const updated = [...cartItems];
-    updated[index].unit_price = parseFloat(newPrice) || 0;
+    updated[index][field] = value;
     setCartItems(updated);
   };
 
@@ -120,10 +185,19 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
     setCartItems(updated);
   };
 
-  // Subtotals & Discounts
-  const totalBeforeDiscount = cartItems.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
-  const discountAmount = (totalBeforeDiscount * (parseFloat(discountPercent) || 0)) / 100;
-  const finalAmount = totalBeforeDiscount - discountAmount;
+  // Calculations with per-item discounts and general discount
+  const getItemEffectivePrice = (item) => {
+    const unitPrice = parseFloat(item.unit_price) || 0;
+    const itemDisc = parseFloat(item.item_discount_percent) || 0;
+    return unitPrice * (1 - itemDisc / 100);
+  };
+
+  const totalBeforeGeneralDiscount = cartItems.reduce((sum, item) => {
+    return sum + (getItemEffectivePrice(item) * item.quantity);
+  }, 0);
+
+  const generalDiscountAmount = (totalBeforeGeneralDiscount * (parseFloat(discountPercent) || 0)) / 100;
+  const finalAmount = totalBeforeGeneralDiscount - generalDiscountAmount;
 
   // Permission Check
   const maxAllowed = user ? (user.max_discount_percent || 10) : 10;
@@ -156,9 +230,7 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
           quoteNumber: res.quote_number
         });
 
-        // Trigger export PDF
         generatePDF(res.quote_number);
-
         if (onQuoteCreated) onQuoteCreated();
       }
     } catch (err) {
@@ -173,7 +245,6 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
     const quoteNumber = qNum || `Q-${Date.now().toString().slice(-6)}`;
     const doc = new jsPDF();
 
-    // Company Header
     doc.setFillColor(15, 23, 42);
     doc.rect(0, 0, 210, 40, 'F');
 
@@ -189,25 +260,24 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
     doc.setFontSize(10);
     doc.text(`Date: ${new Date().toLocaleDateString('en-GB')}`, 140, 30);
 
-    // Customer & Details section
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(11);
     doc.text(`Customer Name: ${customerName || 'Cash Client'}`, 14, 52);
     doc.text(`Sales Rep: ${user ? user.name : 'ProTec Representative'}`, 14, 60);
 
-    // Table of Items
     const tableData = cartItems.map((item, idx) => [
       idx + 1,
       item.code,
       item.name,
       item.quantity,
       `${item.unit_price.toLocaleString()} EGP`,
-      `${(item.unit_price * item.quantity).toLocaleString()} EGP`
+      `${item.item_discount_percent || 0}%`,
+      `${(getItemEffectivePrice(item) * item.quantity).toLocaleString()} EGP`
     ]);
 
     doc.autoTable({
       startY: 68,
-      head: [['#', 'SKU / Code', 'Product Name', 'Qty', 'Unit Price', 'Total']],
+      head: [['#', 'SKU', 'Item Name', 'Qty', 'Unit Price', 'Item Disc %', 'Total']],
       body: tableData,
       theme: 'grid',
       headStyles: { fillColor: [59, 130, 246], textColor: 255 },
@@ -216,23 +286,20 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
 
     const finalY = doc.lastAutoTable.finalY + 10;
 
-    // Totals Box
     doc.setFillColor(241, 245, 249);
-    doc.rect(120, finalY, 76, 35, 'F');
+    doc.rect(115, finalY, 81, 35, 'F');
     doc.setFontSize(10);
-    doc.text(`Subtotal: ${totalBeforeDiscount.toLocaleString()} EGP`, 125, finalY + 10);
-    doc.text(`Discount (${discountPercent}%): -${discountAmount.toLocaleString()} EGP`, 125, finalY + 18);
+    doc.text(`Subtotal: ${totalBeforeGeneralDiscount.toLocaleString()} EGP`, 120, finalY + 10);
+    doc.text(`Extra Discount (${discountPercent}%): -${generalDiscountAmount.toLocaleString()} EGP`, 120, finalY + 18);
     doc.setFontSize(11);
     doc.setTextColor(16, 185, 129);
-    doc.text(`NET TOTAL: ${finalAmount.toLocaleString()} EGP`, 125, finalY + 28);
+    doc.text(`NET TOTAL: ${finalAmount.toLocaleString()} EGP`, 120, finalY + 28);
 
-    // Terms
     doc.setTextColor(100, 116, 139);
     doc.setFontSize(9);
     doc.text('Notes & Terms:', 14, finalY + 10);
     doc.text(notes || 'Validity: 15 Days from quote date. Taxes extra if applicable.', 14, finalY + 18);
 
-    // Save
     doc.save(`Quotation_${quoteNumber}.pdf`);
   };
 
@@ -245,36 +312,44 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
       
-      {/* Top Title & User Permission bar */}
+      {/* Top Title Bar */}
       <div className="glass-panel" style={{ padding: '16px 24px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{ padding: '10px', background: 'rgba(59, 130, 246, 0.15)', borderRadius: '12px', color: '#60a5fa' }}>
             <FileText size={24} />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.2rem' }}>منشئ عروض الأسعار (Smart Quotation Engine)</h3>
-            <p style={{ fontSize: '0.85rem' }}>اختر العميل والمنتجات، وطبق الخصومات حسب صلاحياتك</p>
+            <h3 style={{ fontSize: '1.2rem' }}>منشئ عروض الأسعار بالذكاء الاصطناعي (AI Quotation Engine)</h3>
+            <p style={{ fontSize: '0.85rem' }}>اختر المنتجات أو ارفع ملف العميل ليقوم الذكاء الاصطناعي بتحويله لبنود فورية</p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ background: 'rgba(255,255,255,0.05)', padding: '8px 14px', borderRadius: '10px', fontSize: '0.85rem', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <span>حدك المسموح للخصم: </span>
-            <strong style={{ color: '#60a5fa' }}>{user ? `${user.max_discount_percent}%` : '10%'}</strong>
-          </div>
+        {/* AI Document Upload Button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <label className="btn btn-accent btn-sm" style={{ cursor: 'pointer' }}>
+            <Sparkles size={16} />
+            <span>{parsingFile ? 'جاري تحليل الملف...' : '📁 رفع طلب/ملف العميل بالذكاء الاصطناعي'}</span>
+            <input
+              type="file"
+              accept=".pdf, .xlsx, .xls, .csv, .txt"
+              onChange={handleAIFileUploadToQuote}
+              style={{ display: 'none' }}
+              disabled={parsingFile}
+            />
+          </label>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
         
-        {/* Left Column: Customer & Product Selector */}
+        {/* Left Column: Customer & Product Catalog */}
         <div className="glass-panel" style={{ padding: '20px' }}>
           <h4 style={{ fontSize: '1rem', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#60a5fa' }}>
             <Users size={18} />
             <span>بيانات العميل واختيار المنتجات</span>
           </h4>
 
-          {/* Customer Dropdown / Name */}
+          {/* Customer Dropdown */}
           <div style={{ marginBottom: '16px' }}>
             <label className="input-label">اختر عميل مسجل (نظام CRM)</label>
             <select
@@ -302,11 +377,18 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
 
           <hr style={{ borderColor: 'var(--border-color)', margin: '16px 0' }} />
 
-          {/* Product Search Catalog */}
-          <h4 style={{ fontSize: '0.95rem', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: '#a78bfa' }}>
-            <Search size={16} />
-            <span>بحث السريع بالكود (SKU) أو اسم المنتج</span>
-          </h4>
+          {/* Product Search & Manual Add */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h4 style={{ fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '8px', color: '#a78bfa' }}>
+              <Search size={16} />
+              <span>البحث في كتالوج الأسعار</span>
+            </h4>
+
+            <button className="btn btn-secondary btn-sm" onClick={handleAddManualCustomItem}>
+              <Plus size={14} />
+              <span>إضافة بند يدوي</span>
+            </button>
+          </div>
 
           <div style={{ marginBottom: '12px' }}>
             <input
@@ -314,12 +396,12 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
               className="input-field"
               value={searchProductQuery}
               onChange={(e) => setSearchProductQuery(e.target.value)}
-              placeholder="ادخل كود المنتج مثل PRD-101 أو الكلمة..."
+              placeholder="ادخل كود المنتج مثل PRD-101 أو اسم المنتج..."
             />
           </div>
 
-          {/* Product Cards List */}
-          <div style={{ maxHeight: '350px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* Product List */}
+          <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {filteredProducts.map(p => (
               <div
                 key={p.id}
@@ -361,58 +443,83 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
         <div className="glass-panel" style={{ padding: '20px', display: 'flex', flexDirection: 'column' }}>
           <h4 style={{ fontSize: '1rem', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px', color: '#34d399' }}>
             <Calculator size={18} />
-            <span>جدول عروض الأسعار والحساب التلقائي</span>
+            <span>جدول عروض الأسعار والخصومات الفردية لكل بند</span>
           </h4>
 
-          {/* Cart Table */}
+          {/* Cart Items Table */}
           <div style={{ flex: 1, overflowX: 'auto', marginBottom: '16px' }}>
             {cartItems.length === 0 ? (
               <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-dim)' }}>
                 <FileText size={40} style={{ opacity: 0.3, marginBottom: '10px' }} />
-                <p>لم يتم إضافة منتجات بعرض السعر بعد. ابحث عن منتج وأضفه من القائمة.</p>
+                <p>لم يتم إضافة بنود بعرض السعر بعد. ابحث عن منتج أو ارفع ملف العميل بالذكاء الاصطناعي.</p>
               </div>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'right' }}>
                     <th style={{ padding: '8px' }}>الكود</th>
-                    <th style={{ padding: '8px' }}>المنتج</th>
-                    <th style={{ padding: '8px', width: '90px' }}>الكمية</th>
-                    <th style={{ padding: '8px', width: '110px' }}>السعر</th>
+                    <th style={{ padding: '8px' }}>المنتج/البند</th>
+                    <th style={{ padding: '8px', width: '70px' }}>الكمية</th>
+                    <th style={{ padding: '8px', width: '90px' }}>السعر</th>
+                    <th style={{ padding: '8px', width: '75px' }}>خصم البند %</th>
                     <th style={{ padding: '8px' }}>الإجمالي</th>
-                    <th style={{ padding: '8px', width: '40px' }}></th>
+                    <th style={{ padding: '8px', width: '30px' }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {cartItems.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '8px', fontSize: '0.8rem', color: '#60a5fa', fontWeight: 'bold' }}>{item.code}</td>
-                      <td style={{ padding: '8px' }}>{item.name}</td>
-                      <td style={{ padding: '8px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <button onClick={() => handleQuantityChange(idx, -1)} style={{ padding: '2px 6px', background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>-</button>
-                          <span style={{ fontWeight: 'bold', width: '20px', textAlign: 'center' }}>{item.quantity}</span>
-                          <button onClick={() => handleQuantityChange(idx, 1)} style={{ padding: '2px 6px', background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>+</button>
-                        </div>
-                      </td>
-                      <td style={{ padding: '8px' }}>
-                        <input
-                          type="number"
-                          value={item.unit_price}
-                          onChange={(e) => handleUnitPriceChange(idx, e.target.value)}
-                          style={{ width: '80px', padding: '4px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '4px' }}
-                        />
-                      </td>
-                      <td style={{ padding: '8px', fontWeight: 'bold', color: '#34d399' }}>
-                        {(item.unit_price * item.quantity).toLocaleString()} EGP
-                      </td>
-                      <td style={{ padding: '8px' }}>
-                        <button onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}>
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {cartItems.map((item, idx) => {
+                    const itemEffPrice = getItemEffectivePrice(item);
+                    const itemTotal = itemEffPrice * item.quantity;
+                    return (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', background: item.isManual ? 'rgba(245, 158, 11, 0.05)' : 'transparent' }}>
+                        <td style={{ padding: '8px', fontSize: '0.78rem', color: item.isManual ? '#fbbf24' : '#60a5fa', fontWeight: 'bold' }}>
+                          {item.code}
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <input
+                            type="text"
+                            value={item.name}
+                            onChange={(e) => handleItemFieldChange(idx, 'name', e.target.value)}
+                            style={{ width: '100%', background: 'transparent', border: item.isManual ? '1px solid rgba(245, 158, 11, 0.4)' : 'none', color: '#fff', fontSize: '0.85rem' }}
+                          />
+                          {item.notes && <p style={{ fontSize: '0.72rem', color: item.isManual ? '#fbbf24' : 'var(--text-dim)' }}>{item.notes}</p>}
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <button onClick={() => handleQuantityChange(idx, -1)} style={{ padding: '1px 5px', background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>-</button>
+                            <span style={{ fontWeight: 'bold', width: '18px', textAlign: 'center' }}>{item.quantity}</span>
+                            <button onClick={() => handleQuantityChange(idx, 1)} style={{ padding: '1px 5px', background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>+</button>
+                          </div>
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <input
+                            type="number"
+                            value={item.unit_price}
+                            onChange={(e) => handleItemFieldChange(idx, 'unit_price', parseFloat(e.target.value) || 0)}
+                            style={{ width: '75px', padding: '4px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '4px' }}
+                          />
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={item.item_discount_percent || 0}
+                            onChange={(e) => handleItemFieldChange(idx, 'item_discount_percent', parseFloat(e.target.value) || 0)}
+                            style={{ width: '55px', padding: '4px', background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: '#60a5fa', borderRadius: '4px', textAlign: 'center' }}
+                          />
+                        </td>
+                        <td style={{ padding: '8px', fontWeight: 'bold', color: '#34d399' }}>
+                          {itemTotal.toLocaleString()} EGP
+                        </td>
+                        <td style={{ padding: '8px' }}>
+                          <button onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer' }}>
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -421,12 +528,12 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
           {/* Discount & Totals Section */}
           <div style={{ background: 'rgba(0,0,0,0.2)', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>الإجمالي قبل الخصم:</span>
-              <strong>{totalBeforeDiscount.toLocaleString()} EGP</strong>
+              <span style={{ color: 'var(--text-muted)' }}>الإجمالي بعد الخصومات الفردية للبنود:</span>
+              <strong>{totalBeforeGeneralDiscount.toLocaleString()} EGP</strong>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>نسبة الخصم المطبقة %:</span>
+              <span style={{ color: 'var(--text-muted)' }}>خصم إضافي إجمالي للعرض %:</span>
               <input
                 type="number"
                 min="0"
@@ -439,8 +546,8 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <span style={{ color: 'var(--text-muted)' }}>قيمة الخصم:</span>
-              <span style={{ color: '#f87171' }}>-{discountAmount.toLocaleString()} EGP</span>
+              <span style={{ color: 'var(--text-muted)' }}>قيمة الخصم الإضافي:</span>
+              <span style={{ color: '#f87171' }}>-{generalDiscountAmount.toLocaleString()} EGP</span>
             </div>
 
             <hr style={{ borderColor: 'var(--border-color)', margin: '10px 0' }} />
@@ -451,7 +558,7 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
             </div>
           </div>
 
-          {/* Over Discount Warning Banner */}
+          {/* Over Limit Alert Banner */}
           {isOverDiscountLimit && (
             <div style={{
               padding: '12px 14px',
@@ -467,7 +574,7 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
             }}>
               <AlertTriangle size={20} flexShrink={0} />
               <span>
-                تنبيه: الخصم المدخل (<strong>{discountPercent}%</strong>) يتجاوز حد الخصم المباشر المسموح لك به (<strong>{maxAllowed}%</strong>).
+                تنبيه: الخصم الإجمالي (<strong>{discountPercent}%</strong>) يتجاوز حد الخصم المباشر المسموح لك به (<strong>{maxAllowed}%</strong>).
                 عند حفظ هذا العرض سيتم تحويله تلقائيًا إلى <strong>"بانتظار موافقة المدير"</strong>.
               </span>
             </div>
