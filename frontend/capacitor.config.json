@@ -1,0 +1,9 @@
+{
+  "appId": "com.protec.salesassistant",
+  "appName": "ProTec Sales Assistant",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

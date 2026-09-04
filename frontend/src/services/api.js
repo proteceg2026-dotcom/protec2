@@ -1,9 +1,15 @@
 // Dynamic Server URL & API Service Handler
 
-const DEFAULT_SERVER_URL = 'http://localhost:5000';
-
 export function getServerUrl() {
-  return localStorage.getItem('protec_server_url') || DEFAULT_SERVER_URL;
+  const saved = localStorage.getItem('protec_server_url');
+  if (saved && saved.trim() !== '') {
+    return saved;
+  }
+  // Default to relative/origin when deployed on Render or any domain
+  if (typeof window !== 'undefined' && window.location && window.location.origin) {
+    return window.location.origin;
+  }
+  return 'http://localhost:5000';
 }
 
 export function setServerUrl(url) {
