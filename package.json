@@ -1,0 +1,10 @@
+{
+  "name": "protec-sales-crm",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install-all": "cd backend && npm install && cd ../frontend && npm install",
+    "build": "cd frontend && npm install && npm run build && cd ../backend && npm install",
+    "start": "cd backend && node server.js"
+  }
+}
