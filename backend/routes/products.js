@@ -238,24 +238,35 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
       }
 
       let codeIdx = 0, nameIdx = 1, catIdx = 2, priceIdx = 3, discIdx = 4, stockIdx = 5, termsIdx = 6;
+      let startRowIdx = 1;
 
-      const headerRow = data[0].map(c => String(c).toLowerCase());
-      headerRow.forEach((col, idx) => {
-        if (col.includes('كود') || col.includes('code') || col.includes('sku')) codeIdx = idx;
-        if (col.includes('اسم') || col.includes('name') || col.includes('منتج')) nameIdx = idx;
-        if (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category')) catIdx = idx;
-        if (col.includes('سعر') || col.includes('price') || col.includes('مبلغ')) priceIdx = idx;
-        if (col.includes('خصم') || col.includes('disc') || col.includes('discount')) discIdx = idx;
-        if (col.includes('كمية') || col.includes('مخزون') || col.includes('stock')) stockIdx = idx;
-        if (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note')) termsIdx = idx;
-      });
+      // Scan first 10 rows to detect actual header row
+      for (let r = 0; r < Math.min(10, data.length); r++) {
+        if (!data[r] || !Array.isArray(data[r])) continue;
+        const rowStr = data[r].map(c => String(c).toLowerCase()).join(' ');
 
-      for (let i = 1; i < data.length; i++) {
+        if (rowStr.includes('كود') || rowStr.includes('code') || rowStr.includes('sku') || rowStr.includes('ref') || rowStr.includes('part') || rowStr.includes('مرجع') || rowStr.includes('صنف') || rowStr.includes('ش Schneider')) {
+          startRowIdx = r + 1;
+          const headerRow = data[r].map(c => String(c).toLowerCase());
+          headerRow.forEach((col, idx) => {
+            if (col.includes('كود') || col.includes('code') || col.includes('sku') || col.includes('ref') || col.includes('part') || col.includes('مرجع') || col.includes('صنف')) codeIdx = idx;
+            if (col.includes('اسم') || col.includes('name') || col.includes('منتج') || col.includes('وصف') || col.includes('desc')) nameIdx = idx;
+            if (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category') || col.includes('range')) catIdx = idx;
+            if (col.includes('سعر') || col.includes('price') || col.includes('مبلغ') || col.includes('list')) priceIdx = idx;
+            if (col.includes('خصم') || col.includes('disc') || col.includes('discount')) discIdx = idx;
+            if (col.includes('كمية') || col.includes('مخزون') || col.includes('stock') || col.includes('qty')) stockIdx = idx;
+            if (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note')) termsIdx = idx;
+          });
+          break;
+        }
+      }
+
+      for (let i = startRowIdx; i < data.length; i++) {
         const row = data[i];
         if (!row || row.length === 0) continue;
 
         const code = row[codeIdx] ? String(row[codeIdx]).trim() : `PRD-${Date.now()}-${i}`;
-        const name = row[nameIdx] ? String(row[nameIdx]).trim() : '';
+        const name = row[nameIdx] ? String(row[nameIdx]).trim() : (row[0] ? String(row[0]).trim() : '');
         const category = row[catIdx] ? String(row[catIdx]).trim() : 'عام';
         
         let priceVal = 0;
@@ -349,6 +360,11 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
           [rule.target, rule.min_quantity, rule.discount_percent, rule.terms]
         );
       });
+
+      // Synchronize database to disk immediately
+      if (typeof db.saveSync === 'function') {
+        db.saveSync();
+      }
     });
 
     res.json({

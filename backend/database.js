@@ -30,8 +30,25 @@ function loadStore() {
   }
 }
 
+let saveTimer = null;
 function saveStore() {
-  fs.writeFileSync(dbFilePath, JSON.stringify(store, null, 2), 'utf8');
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      fs.writeFileSync(dbFilePath, JSON.stringify(store, null, 2), 'utf8');
+    } catch (e) {
+      console.error('Error saving database.json', e);
+    }
+  }, 150);
+}
+
+function saveStoreSync() {
+  if (saveTimer) clearTimeout(saveTimer);
+  try {
+    fs.writeFileSync(dbFilePath, JSON.stringify(store, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving database.json', e);
+  }
 }
 
 loadStore();
@@ -517,6 +534,9 @@ class DatabaseDriver {
     }
 
     return { changes: 0 };
+  }
+  saveSync() {
+    saveStoreSync();
   }
 }
 
