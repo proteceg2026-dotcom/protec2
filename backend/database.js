@@ -235,20 +235,20 @@ class DatabaseDriver {
       if (lowerSql.includes('where code = ?')) {
         list = list.filter(p => p && p.code && p.code.toUpperCase() === String(params[0]).toUpperCase());
       } else if (lowerSql.includes('code like') || lowerSql.includes('name like')) {
-        const term = params[0] ? params[0].replace(/%/g, '').toLowerCase() : '';
-        list = list.filter(p => p && (
-          (p.code && p.code.toLowerCase().includes(term)) ||
-          (p.name && p.name.toLowerCase().includes(term)) ||
-          (p.description && p.description.toLowerCase().includes(term)) ||
-          (p.category && p.category.toLowerCase().includes(term))
-        ));
+        const rawTerm = params[0] ? params[0].replace(/%/g, '').toLowerCase().trim() : '';
+        const words = rawTerm.split(/\s+/).filter(w => w.length > 0);
+        list = list.filter(p => {
+          if (!p) return false;
+          const targetStr = `${p.code || ''} ${p.name || ''} ${p.description || ''} ${p.category || ''}`.toLowerCase();
+          return words.every(w => targetStr.includes(w));
+        });
       }
       if (lowerSql.includes('category = ?')) {
         const catVal = params[params.length - 1];
         if (catVal) list = list.filter(p => p && p.category === catVal);
       }
       if (lowerSql.includes('order by id desc')) {
-        list.reverse();
+        list = [...list].reverse();
       }
       return list;
     }

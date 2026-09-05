@@ -82,11 +82,19 @@ router.post('/chat', authenticateToken, (req, res) => {
       db.all("SELECT * FROM discount_rules", [], (err2, rules) => {
         const discountRules = rules || [];
 
-        const matchedProducts = products.filter(p => 
-          queryText.includes(p.code.toLowerCase()) || 
-          queryText.includes(p.name.toLowerCase()) ||
-          queryText.includes(p.category.toLowerCase())
-        );
+        const matchedProducts = products.filter(p => {
+          if (!p) return false;
+          const pCode = (p.code || '').toLowerCase();
+          const pName = (p.name || '').toLowerCase();
+          const pCat = (p.category || '').toLowerCase();
+
+          if (queryText.includes(pCode) || queryText.includes(pName) || (pCat && queryText.includes(pCat))) return true;
+
+          const pWords = pName.split(/\s+/).filter(w => w.length > 2);
+          const qWords = queryText.split(/\s+/).filter(w => w.length > 2);
+          const matchCount = pWords.filter(w => qWords.some(qw => qw.includes(w) || w.includes(qw))).length;
+          return matchCount >= Math.min(2, pWords.length);
+        });
 
         if (matchedProducts.length === 0) {
           return res.json({
@@ -235,12 +243,56 @@ router.post('/parse-file-quote', authenticateToken, upload.single('file'), async
         // Skip common header words
         if (/invoice|quotation|date|total|مبلغ|إجمالي|التاريخ|التفاصيل|عرض سعر/i.test(line)) return;
 
-        // Try SKU / Code or Name match
         const lowerLine = line.toLowerCase();
-        let matchedProd = products.find(p => 
-          lowerLine.includes(p.code.toLowerCase()) || 
-          lowerLine.includes(p.name.toLowerCase())
-        );
+        
+        // Smart match by SKU code or word overlap
+        let matchedProd = products.find(p => {
+          if (!p || !p.name) return false;
+          const pCode = (p.code || '').toLowerCase();
+          const pName = p.name.toLowerCase();
+
+          if (pCode && lowerLine.includes(pCode)) return true;
+          if (lowerLine.includes(pName) || pName.includes(lowerLine)) return true;
+
+          // Word overlap check
+          const pWords = pName.split(/\s+/).filter(w => w.length > 2);
+          const lineWords = lowerLine.split(/\s+/).filter(w => w.length > 2);
+          if (pWords.length === 0 || lineWords.length === 0) return false;
+
+          const matchedWordsCount = pWords.filter(w => lineWords.some(lw => lw.includes(w) || w.includes(lw))).length;
+          return matchedWordsCount >= Math.min(2, pWords.length);
+        });
+
+        // Try extracting quantity
+        const qtyMatch = line.match(/(?:عدد|كمية|بعدد)?\s*(\d+)/i);
+        const quantity = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+        if (matchedProd) {
+          parsedItems.push({
+            id: matchedProd.id,
+            code: matchedProd.code,
+            name: matchedProd.name,
+            unit_price: matchedProd.unit_price,
+            quantity: quantity > 0 ? quantity : 1,
+            item_discount_percent: 0,
+            isMatched: true,
+            notes: 'مطابق لكتالوج لستة الأسعار'
+          });
+        } else {
+          // Unmatched / Unclear item -> leave as manual pricing
+          parsedItems.push({
+            id: `manual-${Date.now()}-${index}`,
+            code: `MANUAL-${index + 1}`,
+            name: line.length > 60 ? line.slice(0, 60) + '...' : line,
+            unit_price: 0,
+            quantity: quantity > 0 ? quantity : 1,
+            item_discount_percent: 0,
+            isMatched: false,
+            isManual: true,
+            notes: '⚠️ بند غير واضح/خارج الكتالوج - يرجى التسعير وتحديد الخصم يدوياً'
+          });
+        }
+      });
 
         // Try extracting quantity
         const qtyMatch = line.match(/(?:عدد|كمية|بعدد)?\s*(\d+)/i);

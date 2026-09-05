@@ -303,11 +303,14 @@ export default function QuoteBuilder({ prefilledDraft, onQuoteCreated }) {
     doc.save(`Quotation_${quoteNumber}.pdf`);
   };
 
-  const filteredProducts = products.filter(p => 
-    p.code.toLowerCase().includes(searchProductQuery.toLowerCase()) ||
-    p.name.toLowerCase().includes(searchProductQuery.toLowerCase()) ||
-    p.category.toLowerCase().includes(searchProductQuery.toLowerCase())
-  );
+  const filteredProducts = products.filter(p => {
+    if (!p) return false;
+    const query = searchProductQuery.toLowerCase().trim();
+    if (!query) return true;
+    const words = query.split(/\s+/).filter(w => w.length > 0);
+    const target = `${p.code || ''} ${p.name || ''} ${p.category || ''} ${p.description || ''}`.toLowerCase();
+    return words.every(w => target.includes(w));
+  });
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
