@@ -25,7 +25,8 @@ router.get('/download-template', (req, res) => {
         'اسم_المنتج': 'مولد كهربائي 50 كيلو واط كاتربيلر',
         'العائلة_القسم': 'المولدات',
         'السعر_الأساسي': 125000,
-        'نسبة_الخصم_العائلة_%': 12,
+        'نسبة_الخصم_%': 12,
+        'ضريبة_القيمة_المضافة_%': 14,
         'الكمية_المتاحة': 10,
         'شروط_وملاحظات_الخصم': 'خصم خاص لعائلة المولدات الكهربائية'
       },
@@ -34,7 +35,8 @@ router.get('/download-template', (req, res) => {
         'اسم_المنتج': 'كابل نحاس مسلح 4x16 ملم (100 متر)',
         'العائلة_القسم': 'الكابلات',
         'السعر_الأساسي': 14500,
-        'نسبة_الخصم_العائلة_%': 5,
+        'نسبة_الخصم_%': 5,
+        'ضريبة_القيمة_المضافة_%': 14,
         'الكمية_المتاحة': 50,
         'شروط_وملاحظات_الخصم': 'خصم توريدات الكابلات'
       },
@@ -43,7 +45,8 @@ router.get('/download-template', (req, res) => {
         'اسم_المنتج': 'لوحة تحكم ATS أتوماتيك 250A',
         'العائلة_القسم': 'لوحات التحكم',
         'السعر_الأساسي': 32000,
-        'نسبة_الخصم_العائلة_%': 8,
+        'نسبة_الخصم_%': 8,
+        'ضريبة_القيمة_المضافة_%': 14,
         'الكمية_المتاحة': 15,
         'شروط_وملاحظات_الخصم': 'خصم لوحات التحكم'
       }
@@ -99,15 +102,15 @@ router.get('/code/:code', authenticateToken, (req, res) => {
 
 // Add new product
 router.post('/', authenticateToken, (req, res) => {
-  const { code, name, description, category, unit_price, min_price, stock_quantity, currency } = req.body;
+  const { code, name, description, category, unit_price, min_price, stock_quantity, currency, discount_percent, vat_percent } = req.body;
 
   if (!code || !name || unit_price === undefined) {
     return res.status(400).json({ success: false, message: 'كود المنتج والاسم والسعر مطلوبون' });
   }
 
   db.run(
-    `INSERT INTO products (code, name, description, category, unit_price, min_price, stock_quantity, currency)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO products (code, name, description, category, unit_price, min_price, stock_quantity, currency, discount_percent, vat_percent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       code.toUpperCase().trim(),
       name.trim(),
@@ -116,7 +119,9 @@ router.post('/', authenticateToken, (req, res) => {
       parseFloat(unit_price),
       min_price ? parseFloat(min_price) : 0,
       stock_quantity ? parseInt(stock_quantity) : 0,
-      currency || 'EGP'
+      currency || 'EGP',
+      discount_percent !== undefined ? parseFloat(discount_percent) : 0,
+      vat_percent !== undefined ? parseFloat(vat_percent) : 14
     ],
     function (err) {
       if (err) {
@@ -132,11 +137,11 @@ router.post('/', authenticateToken, (req, res) => {
 
 // Update product
 router.put('/:id', authenticateToken, (req, res) => {
-  const { code, name, description, category, unit_price, min_price, stock_quantity, currency } = req.body;
+  const { code, name, description, category, unit_price, min_price, stock_quantity, currency, discount_percent, vat_percent } = req.body;
 
   db.run(
     `UPDATE products 
-     SET code = ?, name = ?, description = ?, category = ?, unit_price = ?, min_price = ?, stock_quantity = ?, currency = ?, updated_at = CURRENT_TIMESTAMP
+     SET code = ?, name = ?, description = ?, category = ?, unit_price = ?, min_price = ?, stock_quantity = ?, currency = ?, discount_percent = ?, vat_percent = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
     [
       code.toUpperCase().trim(),
@@ -147,6 +152,8 @@ router.put('/:id', authenticateToken, (req, res) => {
       min_price ? parseFloat(min_price) : 0,
       stock_quantity ? parseInt(stock_quantity) : 0,
       currency || 'EGP',
+      discount_percent !== undefined ? parseFloat(discount_percent) : 0,
+      vat_percent !== undefined ? parseFloat(vat_percent) : 14,
       req.params.id
     ],
     function (err) {
@@ -275,7 +282,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
         if (!data || data.length < 2) continue;
 
-        let codeIdx = -1, nameIdx = -1, catIdx = -1, priceIdx = -1, discIdx = -1, stockIdx = -1, termsIdx = -1;
+        let codeIdx = -1, nameIdx = -1, catIdx = -1, priceIdx = -1, discIdx = -1, vatIdx = -1, stockIdx = -1, termsIdx = -1;
         let startRowIdx = 0;
 
         // Scan first 15 rows to detect header row
@@ -295,7 +302,8 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
               if (nameIdx === -1 && (col.includes('اسم') || col.includes('name') || col.includes('منتج') || col.includes('وصف') || col.includes('desc') || col.includes('بيان') || col.includes('مادة') || col.includes('مهمات') || col.includes('تفاصيل'))) nameIdx = idx;
               if (catIdx === -1 && (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category') || col.includes('range') || col.includes('مجموعة') || col.includes('قطاع'))) catIdx = idx;
               if (priceIdx === -1 && (col.includes('سعر') || col.includes('price') || col.includes('مبلغ') || col.includes('list') || col.includes('قيمة') || col.includes('تكلفة') || col.includes('ثمن') || col.includes('rate'))) priceIdx = idx;
-              if (discIdx === -1 && (col.includes('خصم') || col.includes('disc') || col.includes('discount') || col.includes('نسبة'))) discIdx = idx;
+              if (discIdx === -1 && (col.includes('خصم') || col.includes('disc') || col.includes('discount') || col.includes('نسبة الخصم'))) discIdx = idx;
+              if (vatIdx === -1 && (col.includes('قيمة مضافة') || col.includes('ضريبة') || col.includes('vat') || col.includes('مضافة'))) vatIdx = idx;
               if (stockIdx === -1 && (col.includes('كمية') || col.includes('مخزون') || col.includes('stock') || col.includes('qty') || col.includes('عدد'))) stockIdx = idx;
               if (termsIdx === -1 && (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note'))) termsIdx = idx;
             });
@@ -309,8 +317,9 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         if (catIdx === -1) catIdx = 2;
         if (priceIdx === -1) priceIdx = 3;
         if (discIdx === -1) discIdx = 4;
-        if (stockIdx === -1) stockIdx = 5;
-        if (termsIdx === -1) termsIdx = 6;
+        if (vatIdx === -1) vatIdx = 5;
+        if (stockIdx === -1) stockIdx = 6;
+        if (termsIdx === -1) termsIdx = 7;
 
         for (let i = startRowIdx; i < data.length; i++) {
           const row = data[i];
@@ -376,6 +385,12 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
             discount = parseNumber(row[discIdx]);
           }
 
+          let vat = 14;
+          if (vatIdx !== -1 && row[vatIdx] !== undefined && row[vatIdx] !== null) {
+            const parsedVat = parseNumber(row[vatIdx]);
+            if (parsedVat >= 0) vat = parsedVat;
+          }
+
           let stock = 50;
           if (row[stockIdx] !== undefined && row[stockIdx] !== null) {
             const parsedStock = parseNumber(row[stockIdx]);
@@ -384,7 +399,15 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
           const terms = (row[termsIdx] !== undefined && row[termsIdx] !== null) ? sanitizeStr(row[termsIdx]) : '';
 
-          importedItems.push({ code, name: rawName, unit_price: priceVal, category, stock_quantity: stock });
+          importedItems.push({
+            code,
+            name: rawName,
+            unit_price: priceVal,
+            category,
+            stock_quantity: stock,
+            discount_percent: discount,
+            vat_percent: vat
+          });
 
           if (discount > 0) {
             familyDiscountRules.push({
@@ -418,7 +441,9 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
               name,
               unit_price: price,
               category: 'عام',
-              stock_quantity: 50
+              stock_quantity: 50,
+              discount_percent: 0,
+              vat_percent: 14
             });
           }
         }
@@ -436,19 +461,24 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
     // Upsert items into DB synchronously
     const stmtUpsert = db.prepare(`
-      INSERT INTO products (code, name, unit_price, category, stock_quantity)
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(code) DO UPDATE SET
-        name = excluded.name,
-        unit_price = excluded.unit_price,
-        category = excluded.category,
-        stock_quantity = excluded.stock_quantity,
-        updated_at = CURRENT_TIMESTAMP
+      INSERT INTO products (code, name, description, category, unit_price, min_price, stock_quantity, currency, discount_percent, vat_percent)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     db.serialize(() => {
       importedItems.forEach(item => {
-        stmtUpsert.run([item.code, item.name, item.unit_price, item.category, item.stock_quantity]);
+        stmtUpsert.run([
+          item.code,
+          item.name,
+          '',
+          item.category,
+          item.unit_price,
+          0,
+          item.stock_quantity,
+          'EGP',
+          item.discount_percent || 0,
+          item.vat_percent !== undefined ? item.vat_percent : 14
+        ]);
       });
       stmtUpsert.finalize();
 

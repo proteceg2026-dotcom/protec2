@@ -20,7 +20,13 @@ function loadStore() {
       const content = fs.readFileSync(dbFilePath, 'utf8');
       store = JSON.parse(content);
       if (!store.autoIds) {
-        store.autoIds = { users: 1, products: 1, customers: 1, quotes: 1, activity_logs: 1 };
+        store.autoIds = { users: 1, products: 1, customers: 1, quotes: 1, activity_logs: 1, discount_rules: 1 };
+      }
+      if (Array.isArray(store.products)) {
+        store.products.forEach(p => {
+          if (p.discount_percent === undefined) p.discount_percent = 0;
+          if (p.vat_percent === undefined) p.vat_percent = 14;
+        });
       }
     } catch (e) {
       console.error('Error loading database.json', e);
@@ -89,12 +95,12 @@ function seedData() {
 
   if (store.products.length === 0) {
     const sampleProducts = [
-      ['PRD-101', 'مولد كهربائي 50 كيلو واط', 'مولد ديزل كاتربيلر كات 50 KVA صامت', 'المولدات', 125000, 110000, 8, 'EGP'],
-      ['PRD-102', 'محول كهربائي 100 KVA', 'محول خفض جهد ثلاثي الأوجه', 'المحولات', 85000, 78000, 15, 'EGP'],
-      ['PRD-103', 'كابل مسلح 4x16 ملم (100 متر)', 'كابل نحاس مسلّح عالي الجودة متوافق مع الكود المصري', 'الكابلات', 14500, 13000, 50, 'EGP'],
-      ['PRD-104', 'لوحة تحكم ATS أتوماتيك 250A', 'لوحة نقل القدرة التلقائية للمولدات', 'لوحات التحكم', 32000, 29000, 12, 'EGP'],
-      ['PRD-105', 'بطارية مولد 12V 100Ah', 'بطارية جافة عالية الاعتمادية للمولدات', 'إكسسوارات', 4800, 4200, 100, 'EGP'],
-      ['PRD-106', 'قاطع كهربائي ثلاثي 400A Schneider', 'قاطع تيار مدمج عالي الجودة', 'المقاطعات', 18500, 16800, 25, 'EGP']
+      ['PRD-101', 'مولد كهربائي 50 كيلو واط', 'مولد ديزل كاتربيلر كات 50 KVA صامت', 'المولدات', 125000, 110000, 8, 'EGP', 12, 14],
+      ['PRD-102', 'محول كهربائي 100 KVA', 'محول خفض جهد ثلاثي الأوجه', 'المحولات', 85000, 78000, 15, 'EGP', 5, 14],
+      ['PRD-103', 'كابل مسلح 4x16 ملم (100 متر)', 'كابل نحاس مسلّح عالي الجودة متوافق مع الكود المصري', 'الكابلات', 14500, 13000, 50, 'EGP', 0, 14],
+      ['PRD-104', 'لوحة تحكم ATS أتوماتيك 250A', 'لوحة نقل القدرة التلقائية للمولدات', 'لوحات التحكم', 32000, 29000, 12, 'EGP', 8, 14],
+      ['PRD-105', 'بطارية مولد 12V 100Ah', 'بطارية جافة عالية الاعتمادية للمولدات', 'إكسسوارات', 4800, 4200, 100, 'EGP', 0, 14],
+      ['PRD-106', 'قاطع كهربائي ثلاثي 400A Schneider', 'قاطع تيار مدمج عالي الجودة', 'المقاطعات', 18500, 16800, 25, 'EGP', 10, 14]
     ];
 
     sampleProducts.forEach(p => {
@@ -108,6 +114,8 @@ function seedData() {
         min_price: p[5],
         stock_quantity: p[6],
         currency: p[7],
+        discount_percent: p[8] !== undefined ? p[8] : 0,
+        vat_percent: p[9] !== undefined ? p[9] : 14,
         updated_at: new Date().toISOString()
       });
     });
@@ -341,8 +349,7 @@ class DatabaseDriver {
       const code = rawCode.length > 0 ? rawCode : `PRD-${store.autoIds.products}`;
       const existingIdx = store.products.findIndex(p => p && p.code && p.code.toUpperCase() === code.toUpperCase());
 
-      // Detect parameter positions based on query or param count
-      let name, description, category, unit_price, min_price, stock_quantity, currency;
+      let name, description, category, unit_price, min_price, stock_quantity, currency, discount_percent, vat_percent;
       
       if (params.length >= 8) {
         name = params[1] ? String(params[1]).trim() : '';
@@ -352,6 +359,8 @@ class DatabaseDriver {
         min_price = parseFloat(params[5]) || 0;
         stock_quantity = parseInt(params[6]) || 10;
         currency = params[7] || 'EGP';
+        discount_percent = params[8] !== undefined && params[8] !== null ? parseFloat(params[8]) : 0;
+        vat_percent = params[9] !== undefined && params[9] !== null ? parseFloat(params[9]) : 14;
       } else {
         name = params[1] ? String(params[1]).trim() : '';
         unit_price = parseFloat(params[2]) || 0;
@@ -360,6 +369,8 @@ class DatabaseDriver {
         description = '';
         min_price = 0;
         currency = 'EGP';
+        discount_percent = 0;
+        vat_percent = 14;
       }
 
       if (existingIdx > -1) {
@@ -370,6 +381,8 @@ class DatabaseDriver {
           category: category || store.products[existingIdx].category,
           unit_price: unit_price > 0 ? unit_price : store.products[existingIdx].unit_price,
           stock_quantity: stock_quantity > 0 ? stock_quantity : store.products[existingIdx].stock_quantity,
+          discount_percent: discount_percent !== undefined ? discount_percent : (store.products[existingIdx].discount_percent || 0),
+          vat_percent: vat_percent !== undefined ? vat_percent : (store.products[existingIdx].vat_percent || 14),
           updated_at: new Date().toISOString()
         };
         saveStore();
@@ -387,6 +400,8 @@ class DatabaseDriver {
         min_price,
         stock_quantity,
         currency,
+        discount_percent,
+        vat_percent,
         updated_at: new Date().toISOString()
       };
       store.products.push(newProd);
@@ -462,10 +477,12 @@ class DatabaseDriver {
           name: params[1],
           description: params[2],
           category: params[3],
-          unit_price: params[4],
-          min_price: params[5],
-          stock_quantity: params[6],
-          currency: params[7],
+          unit_price: parseFloat(params[4]) || 0,
+          min_price: parseFloat(params[5]) || 0,
+          stock_quantity: parseInt(params[6]) || 0,
+          currency: params[7] || 'EGP',
+          discount_percent: params[8] !== undefined ? parseFloat(params[8]) : 0,
+          vat_percent: params[9] !== undefined ? parseFloat(params[9]) : 14,
           updated_at: new Date().toISOString()
         };
         return { lastID: prodId, changes: 1 };

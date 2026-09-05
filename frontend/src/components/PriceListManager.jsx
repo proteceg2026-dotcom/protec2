@@ -58,7 +58,9 @@ export default function PriceListManager() {
     unit_price: '',
     min_price: '',
     stock_quantity: 50,
-    currency: 'EGP'
+    currency: 'EGP',
+    discount_percent: 0,
+    vat_percent: 14
   });
 
   // Discount Rule Form
@@ -211,7 +213,9 @@ export default function PriceListManager() {
       unit_price: '',
       min_price: '',
       stock_quantity: 50,
-      currency: 'EGP'
+      currency: 'EGP',
+      discount_percent: 0,
+      vat_percent: 14
     });
     setModalOpen(true);
   };
@@ -226,7 +230,9 @@ export default function PriceListManager() {
       unit_price: p.unit_price,
       min_price: p.min_price || '',
       stock_quantity: p.stock_quantity || 10,
-      currency: p.currency || 'EGP'
+      currency: p.currency || 'EGP',
+      discount_percent: p.discount_percent || 0,
+      vat_percent: p.vat_percent !== undefined ? p.vat_percent : 14
     });
     setModalOpen(true);
   };
