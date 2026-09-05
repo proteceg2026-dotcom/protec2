@@ -155,14 +155,14 @@ class DatabaseDriver {
       params = [];
     }
 
-    setImmediate(() => {
-      try {
-        const rows = this._executeQuery(sql, params);
-        if (callback) callback(null, rows.length > 0 ? rows[0] : null);
-      } catch (err) {
-        if (callback) callback(err, null);
-      }
-    });
+    try {
+      const rows = this._executeQuery(sql, params);
+      const res = rows.length > 0 ? rows[0] : null;
+      if (callback) callback(null, res);
+      return res;
+    } catch (err) {
+      if (callback) callback(err, null);
+    }
   }
 
   all(sql, params = [], callback) {
@@ -171,14 +171,14 @@ class DatabaseDriver {
       params = [];
     }
 
-    setImmediate(() => {
-      try {
-        const rows = this._executeQuery(sql, params);
-        if (callback) callback(null, rows);
-      } catch (err) {
-        if (callback) callback(err, []);
-      }
-    });
+    try {
+      const rows = this._executeQuery(sql, params);
+      if (callback) callback(null, rows);
+      return rows;
+    } catch (err) {
+      if (callback) callback(err, []);
+      return [];
+    }
   }
 
   run(sql, params = [], callback) {
@@ -187,15 +187,14 @@ class DatabaseDriver {
       params = [];
     }
 
-    setImmediate(() => {
-      try {
-        const result = this._executeUpdate(sql, params);
-        saveStore();
-        if (callback) callback.call(result, null);
-      } catch (err) {
-        if (callback) callback(err);
-      }
-    });
+    try {
+      const result = this._executeUpdate(sql, params);
+      saveStore();
+      if (callback) callback.call(result, null);
+      return result;
+    } catch (err) {
+      if (callback) callback(err);
+    }
   }
 
   prepare(sql) {
@@ -234,15 +233,22 @@ class DatabaseDriver {
     if (lowerSql.includes('from products')) {
       let list = [...store.products];
       if (lowerSql.includes('where code = ?')) {
-        list = list.filter(p => p.code === params[0]);
+        list = list.filter(p => p && p.code && p.code.toUpperCase() === String(params[0]).toUpperCase());
       } else if (lowerSql.includes('code like') || lowerSql.includes('name like')) {
         const term = params[0] ? params[0].replace(/%/g, '').toLowerCase() : '';
-        list = list.filter(p => 
-          p.code.toLowerCase().includes(term) ||
-          p.name.toLowerCase().includes(term) ||
+        list = list.filter(p => p && (
+          (p.code && p.code.toLowerCase().includes(term)) ||
+          (p.name && p.name.toLowerCase().includes(term)) ||
           (p.description && p.description.toLowerCase().includes(term)) ||
           (p.category && p.category.toLowerCase().includes(term))
-        );
+        ));
+      }
+      if (lowerSql.includes('category = ?')) {
+        const catVal = params[params.length - 1];
+        if (catVal) list = list.filter(p => p && p.category === catVal);
+      }
+      if (lowerSql.includes('order by id desc')) {
+        list.reverse();
       }
       return list;
     }
@@ -331,14 +337,15 @@ class DatabaseDriver {
 
     // INSERT INTO PRODUCTS
     if (lowerSql.includes('insert into products')) {
-      const code = params[0];
-      const existingIdx = store.products.findIndex(p => p && p.code === code);
+      const rawCode = params[0] !== undefined && params[0] !== null ? String(params[0]).trim() : '';
+      const code = rawCode.length > 0 ? rawCode : `PRD-${store.autoIds.products}`;
+      const existingIdx = store.products.findIndex(p => p && p.code && p.code.toUpperCase() === code.toUpperCase());
 
       // Detect parameter positions based on query or param count
       let name, description, category, unit_price, min_price, stock_quantity, currency;
       
       if (params.length >= 8) {
-        name = params[1];
+        name = params[1] ? String(params[1]).trim() : '';
         description = params[2] || '';
         category = params[3] || 'عام';
         unit_price = parseFloat(params[4]) || 0;
@@ -346,7 +353,7 @@ class DatabaseDriver {
         stock_quantity = parseInt(params[6]) || 10;
         currency = params[7] || 'EGP';
       } else {
-        name = params[1];
+        name = params[1] ? String(params[1]).trim() : '';
         unit_price = parseFloat(params[2]) || 0;
         category = params[3] || 'عام';
         stock_quantity = parseInt(params[4]) || 10;
@@ -359,10 +366,10 @@ class DatabaseDriver {
         store.products[existingIdx] = {
           ...store.products[existingIdx],
           code,
-          name,
-          category,
-          unit_price,
-          stock_quantity,
+          name: name || store.products[existingIdx].name,
+          category: category || store.products[existingIdx].category,
+          unit_price: unit_price > 0 ? unit_price : store.products[existingIdx].unit_price,
+          stock_quantity: stock_quantity > 0 ? stock_quantity : store.products[existingIdx].stock_quantity,
           updated_at: new Date().toISOString()
         };
         saveStore();
@@ -373,9 +380,9 @@ class DatabaseDriver {
       const newProd = {
         id,
         code,
-        name,
+        name: name || `منتج ${code}`,
         description,
-        category,
+        category: category || 'عام',
         unit_price,
         min_price,
         stock_quantity,

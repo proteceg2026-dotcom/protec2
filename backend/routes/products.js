@@ -237,7 +237,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         return res.status(400).json({ success: false, message: 'الملف فارغ أو لا يحتوي على صفوف بيانات' });
       }
 
-      let codeIdx = 0, nameIdx = 1, catIdx = 2, priceIdx = 3, discIdx = 4, stockIdx = 5, termsIdx = 6;
+      let codeIdx = -1, nameIdx = -1, catIdx = -1, priceIdx = -1, discIdx = -1, stockIdx = -1, termsIdx = -1;
       let startRowIdx = 1;
 
       // Scan first 10 rows to detect actual header row
@@ -245,34 +245,67 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         if (!data[r] || !Array.isArray(data[r])) continue;
         const rowStr = data[r].map(c => String(c).toLowerCase()).join(' ');
 
-        if (rowStr.includes('كود') || rowStr.includes('code') || rowStr.includes('sku') || rowStr.includes('ref') || rowStr.includes('part') || rowStr.includes('مرجع') || rowStr.includes('صنف') || rowStr.includes('ش Schneider')) {
+        if (
+          rowStr.includes('كود') || rowStr.includes('code') || rowStr.includes('sku') || rowStr.includes('ref') ||
+          rowStr.includes('part') || rowStr.includes('مرجع') || rowStr.includes('صنف') || rowStr.includes('اسم') ||
+          rowStr.includes('سعر') || rowStr.includes('ش schneider')
+        ) {
           startRowIdx = r + 1;
           const headerRow = data[r].map(c => String(c).toLowerCase());
           headerRow.forEach((col, idx) => {
-            if (col.includes('كود') || col.includes('code') || col.includes('sku') || col.includes('ref') || col.includes('part') || col.includes('مرجع') || col.includes('صنف')) codeIdx = idx;
-            if (col.includes('اسم') || col.includes('name') || col.includes('منتج') || col.includes('وصف') || col.includes('desc')) nameIdx = idx;
-            if (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category') || col.includes('range')) catIdx = idx;
-            if (col.includes('سعر') || col.includes('price') || col.includes('مبلغ') || col.includes('list')) priceIdx = idx;
-            if (col.includes('خصم') || col.includes('disc') || col.includes('discount')) discIdx = idx;
-            if (col.includes('كمية') || col.includes('مخزون') || col.includes('stock') || col.includes('qty')) stockIdx = idx;
-            if (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note')) termsIdx = idx;
+            if (codeIdx === -1 && (col.includes('كود') || col.includes('code') || col.includes('sku') || col.includes('ref') || col.includes('part') || col.includes('مرجع') || col.includes('رقم الصنف'))) codeIdx = idx;
+            if (nameIdx === -1 && (col.includes('اسم') || col.includes('name') || col.includes('منتج') || col.includes('وصف') || col.includes('desc') || col.includes('البيان'))) nameIdx = idx;
+            if (catIdx === -1 && (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category') || col.includes('range'))) catIdx = idx;
+            if (priceIdx === -1 && (col.includes('سعر') || col.includes('price') || col.includes('مبلغ') || col.includes('list') || col.includes('القيمة'))) priceIdx = idx;
+            if (discIdx === -1 && (col.includes('خصم') || col.includes('disc') || col.includes('discount'))) discIdx = idx;
+            if (stockIdx === -1 && (col.includes('كمية') || col.includes('مخزون') || col.includes('stock') || col.includes('qty'))) stockIdx = idx;
+            if (termsIdx === -1 && (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note'))) termsIdx = idx;
           });
           break;
         }
       }
 
+      // Default index fallbacks if header detection didn't match certain columns
+      if (codeIdx === -1) codeIdx = 0;
+      if (nameIdx === -1) nameIdx = (codeIdx === 0 ? 1 : 0);
+      if (catIdx === -1) catIdx = 2;
+      if (priceIdx === -1) priceIdx = 3;
+      if (discIdx === -1) discIdx = 4;
+      if (stockIdx === -1) stockIdx = 5;
+      if (termsIdx === -1) termsIdx = 6;
+
       for (let i = startRowIdx; i < data.length; i++) {
         const row = data[i];
-        if (!row || row.length === 0) continue;
+        if (!row || !Array.isArray(row) || row.length === 0) continue;
 
-        const code = row[codeIdx] ? String(row[codeIdx]).trim() : `PRD-${Date.now()}-${i}`;
-        const name = row[nameIdx] ? String(row[nameIdx]).trim() : (row[0] ? String(row[0]).trim() : '');
-        const category = row[catIdx] ? String(row[catIdx]).trim() : 'عام';
-        
+        const rawCode = (row[codeIdx] !== undefined && row[codeIdx] !== null) ? String(row[codeIdx]).trim() : '';
+        const rawName = (row[nameIdx] !== undefined && row[nameIdx] !== null) ? String(row[nameIdx]).trim() : '';
+        const fallbackName = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
+
+        const name = rawName.length > 0 ? rawName : fallbackName;
+        const code = rawCode.length > 0 ? rawCode : `PRD-${i + 1}-${Date.now().toString().slice(-4)}`;
+        const category = (row[catIdx] !== undefined && row[catIdx] !== null) ? String(row[catIdx]).trim() : 'عام';
+
         let priceVal = 0;
         if (row[priceIdx] !== undefined && row[priceIdx] !== null) {
           const rawPrice = String(row[priceIdx]).replace(/,/g, '').replace(/[^\d.]/g, '');
           priceVal = parseFloat(rawPrice) || 0;
+        }
+
+        // Smart fallback price search across row cells if priceVal is 0
+        if (priceVal === 0) {
+          for (let colVal of row) {
+            if (colVal !== undefined && colVal !== null) {
+              const numStr = String(colVal).replace(/,/g, '').trim();
+              if (/^\d+(\.\d+)?$/.test(numStr)) {
+                const parsed = parseFloat(numStr);
+                if (parsed > 0 && parsed !== parseInt(code)) {
+                  priceVal = parsed;
+                  break;
+                }
+              }
+            }
+          }
         }
 
         let discount = 0;
@@ -285,11 +318,11 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
           stock = parseInt(String(row[stockIdx]).replace(/[^\d]/g, '')) || 10;
         }
 
-        const terms = row[termsIdx] ? String(row[termsIdx]).trim() : '';
+        const terms = (row[termsIdx] !== undefined && row[termsIdx] !== null) ? String(row[termsIdx]).trim() : '';
 
         if (name && name.trim() !== '') {
           importedItems.push({ code, name, unit_price: priceVal, category, stock_quantity: stock });
-          
+
           if (discount > 0) {
             familyDiscountRules.push({
               target: category,
@@ -309,7 +342,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
       for (let line of lines) {
         line = line.trim();
         if (!line) continue;
-        
+
         const matches = line.match(/([A-Z0-9_-]+)?\s*([^\d]+)\s+([\d,.]+)/i);
         if (matches) {
           const code = matches[1] ? matches[1].trim() : `PDF-${counter++}`;
@@ -335,7 +368,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
       return res.status(400).json({ success: false, message: 'لم يتم العثور على منتجات صالحة في الملف للاستيراد' });
     }
 
-    // Upsert items into DB
+    // Upsert items into DB synchronously
     const stmtUpsert = db.prepare(`
       INSERT INTO products (code, name, unit_price, category, stock_quantity)
       VALUES (?, ?, ?, ?, ?)
@@ -369,7 +402,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
     res.json({
       success: true,
-      message: `تم استيراد ${importedItems.length} منتج وحفظ ${familyDiscountRules.length} شرط خصم عائلة بنجاح من الملف القياسي!`,
+      message: `تم استيراد ${importedItems.length} منتج وحفظ ${familyDiscountRules.length} شرط خصم عائلة بنجاح من الملف!`,
       importedCount: importedItems.length,
       rulesCount: familyDiscountRules.length
     });
