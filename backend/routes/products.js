@@ -217,14 +217,33 @@ router.delete('/discount-rules/:id', authenticateToken, (req, res) => {
 // Upload price list & discount policy (Excel / CSV / PDF)
 router.post('/upload-pricelist', authenticateToken, upload.single('file'), async (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ success: false, message: 'يرجى اختيار ملف لستة الأسعار والخصومات' });
+    return res.status(400).json({
+      success: false,
+      message: 'يرجى اختيار ملف لستة الأسعار والخصومات (Excel / CSV / PDF)'
+    });
   }
 
   const filePath = req.file.path;
   const originalName = req.file.originalname.toLowerCase();
+  
+  // Supported Extensions Check
+  const validExtensions = ['.xlsx', '.xls', '.csv', '.pdf'];
+  const hasValidExt = validExtensions.some(ext => originalName.endsWith(ext));
+  
+  if (!hasValidExt) {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return res.status(400).json({
+      success: false,
+      message: 'صيغة الملف غير مدعومة. يرجى اختيار ملف إكسيل (.xlsx, .xls) أو CSV أو PDF'
+    });
+  }
+
   let importedItems = [];
   let familyDiscountRules = [];
+  let errorLogs = [];
+  let skippedRowsCount = 0;
 
+  // Arabic-Indic to Western Digit converter and Number parser
   const parseNumber = (val) => {
     if (val === undefined || val === null) return 0;
     let str = String(val).trim();
@@ -235,6 +254,15 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
     }
     const cleaned = str.replace(/,/g, '').replace(/[^\d.]/g, '');
     return parseFloat(cleaned) || 0;
+  };
+
+  // String sanitizer
+  const sanitizeStr = (str) => {
+    if (!str) return '';
+    return String(str)
+      .replace(/[\r\n\t]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   try {
@@ -288,15 +316,15 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
           const row = data[i];
           if (!row || !Array.isArray(row) || row.length === 0) continue;
 
-          let rawCode = (row[codeIdx] !== undefined && row[codeIdx] !== null) ? String(row[codeIdx]).trim() : '';
-          let rawName = (row[nameIdx] !== undefined && row[nameIdx] !== null) ? String(row[nameIdx]).trim() : '';
-          let category = (row[catIdx] !== undefined && row[catIdx] !== null) ? String(row[catIdx]).trim() : 'عام';
+          let rawCode = (row[codeIdx] !== undefined && row[codeIdx] !== null) ? sanitizeStr(row[codeIdx]) : '';
+          let rawName = (row[nameIdx] !== undefined && row[nameIdx] !== null) ? sanitizeStr(row[nameIdx]) : '';
+          let category = (row[catIdx] !== undefined && row[catIdx] !== null) ? sanitizeStr(row[catIdx]) : 'عام';
 
           // Fallback name search across row if name is missing or header title
           if (!rawName || rawName.length < 2) {
             for (let cell of row) {
               if (cell !== undefined && cell !== null) {
-                const cellStr = String(cell).trim();
+                const cellStr = sanitizeStr(cell);
                 if (
                   cellStr.length > 2 &&
                   isNaN(cellStr) &&
@@ -319,6 +347,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
             lowerName === 'المواصفات' || lowerName === 'وصف المنتج' || lowerName === 'name' ||
             lowerName === 'product name' || lowerName === 'code' || lowerName === 'sku'
           ) {
+            skippedRowsCount++;
             continue;
           }
 
@@ -347,13 +376,13 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
             discount = parseNumber(row[discIdx]);
           }
 
-          let stock = 10;
+          let stock = 50;
           if (row[stockIdx] !== undefined && row[stockIdx] !== null) {
             const parsedStock = parseNumber(row[stockIdx]);
             if (parsedStock > 0) stock = parseInt(parsedStock);
           }
 
-          const terms = (row[termsIdx] !== undefined && row[termsIdx] !== null) ? String(row[termsIdx]).trim() : '';
+          const terms = (row[termsIdx] !== undefined && row[termsIdx] !== null) ? sanitizeStr(row[termsIdx]) : '';
 
           importedItems.push({ code, name: rawName, unit_price: priceVal, category, stock_quantity: stock });
 
@@ -374,13 +403,13 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
       let counter = 1;
       for (let line of lines) {
-        line = line.trim();
+        line = sanitizeStr(line);
         if (!line) continue;
 
         const matches = line.match(/([A-Z0-9_-]+)?\s*([^\d]+)\s+([\d,.]+)/i);
         if (matches) {
-          const code = matches[1] ? matches[1].trim() : `PDF-${counter++}`;
-          const name = matches[2] ? matches[2].trim() : '';
+          const code = matches[1] ? sanitizeStr(matches[1]) : `PDF-${counter++}`;
+          const name = matches[2] ? sanitizeStr(matches[2]) : '';
           const price = parseNumber(matches[3]);
 
           if (name.length > 2 && price > 0) {
@@ -389,7 +418,7 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
               name,
               unit_price: price,
               category: 'عام',
-              stock_quantity: 10
+              stock_quantity: 50
             });
           }
         }
@@ -399,7 +428,10 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
     if (importedItems.length === 0) {
-      return res.status(400).json({ success: false, message: 'لم يتم العثور على منتجات صالحة في الملف للاستيراد' });
+      return res.status(400).json({
+        success: false,
+        message: 'لم يتم العثور على منتجات صالحة في الملف للاستيراد. يرجى التأكد من احتواء الملف على أعمدة الأسعار والأسماء.'
+      });
     }
 
     // Upsert items into DB synchronously
@@ -436,14 +468,19 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
 
     res.json({
       success: true,
-      message: `تم استيراد ${importedItems.length} منتج وحفظ ${familyDiscountRules.length} شرط خصم عائلة بنجاح من الملف!`,
+      message: `تم استيراد ${importedItems.length} منتج وحفظ ${familyDiscountRules.length} شرط خصم بنجاح من الملف!`,
       importedCount: importedItems.length,
-      rulesCount: familyDiscountRules.length
+      rulesCount: familyDiscountRules.length,
+      skippedCount: skippedRowsCount,
+      errors: errorLogs
     });
 
   } catch (error) {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    res.status(500).json({ success: false, message: 'حدث خطأ أثناء معالجة الملف: ' + error.message });
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ غير متوقع أثناء معالجة وقراءة الملف: ' + error.message
+    });
   }
 });
 
