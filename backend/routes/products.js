@@ -225,103 +225,137 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
   let importedItems = [];
   let familyDiscountRules = [];
 
+  const parseNumber = (val) => {
+    if (val === undefined || val === null) return 0;
+    let str = String(val).trim();
+    if (!str) return 0;
+    const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    for (let d = 0; d < 10; d++) {
+      str = str.split(arabicDigits[d]).join(String(d));
+    }
+    const cleaned = str.replace(/,/g, '').replace(/[^\d.]/g, '');
+    return parseFloat(cleaned) || 0;
+  };
+
   try {
     if (originalName.endsWith('.xlsx') || originalName.endsWith('.xls') || originalName.endsWith('.csv')) {
       const workbook = xlsx.readFile(filePath);
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
-      const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-      if (data.length < 2) {
-        fs.unlinkSync(filePath);
-        return res.status(400).json({ success: false, message: 'الملف فارغ أو لا يحتوي على صفوف بيانات' });
-      }
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
 
-      let codeIdx = -1, nameIdx = -1, catIdx = -1, priceIdx = -1, discIdx = -1, stockIdx = -1, termsIdx = -1;
-      let startRowIdx = 1;
+        if (!data || data.length < 2) continue;
 
-      // Scan first 10 rows to detect actual header row
-      for (let r = 0; r < Math.min(10, data.length); r++) {
-        if (!data[r] || !Array.isArray(data[r])) continue;
-        const rowStr = data[r].map(c => String(c).toLowerCase()).join(' ');
+        let codeIdx = -1, nameIdx = -1, catIdx = -1, priceIdx = -1, discIdx = -1, stockIdx = -1, termsIdx = -1;
+        let startRowIdx = 0;
 
-        if (
-          rowStr.includes('كود') || rowStr.includes('code') || rowStr.includes('sku') || rowStr.includes('ref') ||
-          rowStr.includes('part') || rowStr.includes('مرجع') || rowStr.includes('صنف') || rowStr.includes('اسم') ||
-          rowStr.includes('سعر') || rowStr.includes('ش schneider')
-        ) {
-          startRowIdx = r + 1;
-          const headerRow = data[r].map(c => String(c).toLowerCase());
-          headerRow.forEach((col, idx) => {
-            if (codeIdx === -1 && (col.includes('كود') || col.includes('code') || col.includes('sku') || col.includes('ref') || col.includes('part') || col.includes('مرجع') || col.includes('رقم الصنف'))) codeIdx = idx;
-            if (nameIdx === -1 && (col.includes('اسم') || col.includes('name') || col.includes('منتج') || col.includes('وصف') || col.includes('desc') || col.includes('البيان'))) nameIdx = idx;
-            if (catIdx === -1 && (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category') || col.includes('range'))) catIdx = idx;
-            if (priceIdx === -1 && (col.includes('سعر') || col.includes('price') || col.includes('مبلغ') || col.includes('list') || col.includes('القيمة'))) priceIdx = idx;
-            if (discIdx === -1 && (col.includes('خصم') || col.includes('disc') || col.includes('discount'))) discIdx = idx;
-            if (stockIdx === -1 && (col.includes('كمية') || col.includes('مخزون') || col.includes('stock') || col.includes('qty'))) stockIdx = idx;
-            if (termsIdx === -1 && (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note'))) termsIdx = idx;
-          });
-          break;
-        }
-      }
+        // Scan first 15 rows to detect header row
+        for (let r = 0; r < Math.min(15, data.length); r++) {
+          if (!data[r] || !Array.isArray(data[r])) continue;
+          const rowStr = data[r].map(c => String(c).toLowerCase()).join(' ');
 
-      // Default index fallbacks if header detection didn't match certain columns
-      if (codeIdx === -1) codeIdx = 0;
-      if (nameIdx === -1) nameIdx = (codeIdx === 0 ? 1 : 0);
-      if (catIdx === -1) catIdx = 2;
-      if (priceIdx === -1) priceIdx = 3;
-      if (discIdx === -1) discIdx = 4;
-      if (stockIdx === -1) stockIdx = 5;
-      if (termsIdx === -1) termsIdx = 6;
-
-      for (let i = startRowIdx; i < data.length; i++) {
-        const row = data[i];
-        if (!row || !Array.isArray(row) || row.length === 0) continue;
-
-        const rawCode = (row[codeIdx] !== undefined && row[codeIdx] !== null) ? String(row[codeIdx]).trim() : '';
-        const rawName = (row[nameIdx] !== undefined && row[nameIdx] !== null) ? String(row[nameIdx]).trim() : '';
-        const fallbackName = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
-
-        const name = rawName.length > 0 ? rawName : fallbackName;
-        const code = rawCode.length > 0 ? rawCode : `PRD-${i + 1}-${Date.now().toString().slice(-4)}`;
-        const category = (row[catIdx] !== undefined && row[catIdx] !== null) ? String(row[catIdx]).trim() : 'عام';
-
-        let priceVal = 0;
-        if (row[priceIdx] !== undefined && row[priceIdx] !== null) {
-          const rawPrice = String(row[priceIdx]).replace(/,/g, '').replace(/[^\d.]/g, '');
-          priceVal = parseFloat(rawPrice) || 0;
+          if (
+            rowStr.includes('كود') || rowStr.includes('code') || rowStr.includes('sku') || rowStr.includes('ref') ||
+            rowStr.includes('صنف') || rowStr.includes('اسم') || rowStr.includes('سعر') || rowStr.includes('بيان') ||
+            rowStr.includes('مهمات') || rowStr.includes('مادة') || rowStr.includes('price') || rowStr.includes('item')
+          ) {
+            startRowIdx = r + 1;
+            const headerRow = data[r].map(c => String(c).toLowerCase());
+            headerRow.forEach((col, idx) => {
+              if (codeIdx === -1 && (col.includes('كود') || col.includes('code') || col.includes('sku') || col.includes('ref') || col.includes('part') || col.includes('مرجع') || col.includes('رقم الصنف') || col.includes('رمز'))) codeIdx = idx;
+              if (nameIdx === -1 && (col.includes('اسم') || col.includes('name') || col.includes('منتج') || col.includes('وصف') || col.includes('desc') || col.includes('بيان') || col.includes('مادة') || col.includes('مهمات') || col.includes('تفاصيل'))) nameIdx = idx;
+              if (catIdx === -1 && (col.includes('عائلة') || col.includes('قسم') || col.includes('تصنيف') || col.includes('family') || col.includes('category') || col.includes('range') || col.includes('مجموعة') || col.includes('قطاع'))) catIdx = idx;
+              if (priceIdx === -1 && (col.includes('سعر') || col.includes('price') || col.includes('مبلغ') || col.includes('list') || col.includes('قيمة') || col.includes('تكلفة') || col.includes('ثمن') || col.includes('rate'))) priceIdx = idx;
+              if (discIdx === -1 && (col.includes('خصم') || col.includes('disc') || col.includes('discount') || col.includes('نسبة'))) discIdx = idx;
+              if (stockIdx === -1 && (col.includes('كمية') || col.includes('مخزون') || col.includes('stock') || col.includes('qty') || col.includes('عدد'))) stockIdx = idx;
+              if (termsIdx === -1 && (col.includes('ملاحظ') || col.includes('شرط') || col.includes('term') || col.includes('note'))) termsIdx = idx;
+            });
+            break;
+          }
         }
 
-        // Smart fallback price search across row cells if priceVal is 0
-        if (priceVal === 0) {
-          for (let colVal of row) {
-            if (colVal !== undefined && colVal !== null) {
-              const numStr = String(colVal).replace(/,/g, '').trim();
-              if (/^\d+(\.\d+)?$/.test(numStr)) {
-                const parsed = parseFloat(numStr);
-                if (parsed > 0 && parsed !== parseInt(code)) {
-                  priceVal = parsed;
+        // Default index fallbacks if header detection didn't match certain columns
+        if (codeIdx === -1) codeIdx = 0;
+        if (nameIdx === -1) nameIdx = (codeIdx === 0 ? 1 : 0);
+        if (catIdx === -1) catIdx = 2;
+        if (priceIdx === -1) priceIdx = 3;
+        if (discIdx === -1) discIdx = 4;
+        if (stockIdx === -1) stockIdx = 5;
+        if (termsIdx === -1) termsIdx = 6;
+
+        for (let i = startRowIdx; i < data.length; i++) {
+          const row = data[i];
+          if (!row || !Array.isArray(row) || row.length === 0) continue;
+
+          let rawCode = (row[codeIdx] !== undefined && row[codeIdx] !== null) ? String(row[codeIdx]).trim() : '';
+          let rawName = (row[nameIdx] !== undefined && row[nameIdx] !== null) ? String(row[nameIdx]).trim() : '';
+          let category = (row[catIdx] !== undefined && row[catIdx] !== null) ? String(row[catIdx]).trim() : 'عام';
+
+          // Fallback name search across row if name is missing or header title
+          if (!rawName || rawName.length < 2) {
+            for (let cell of row) {
+              if (cell !== undefined && cell !== null) {
+                const cellStr = String(cell).trim();
+                if (
+                  cellStr.length > 2 &&
+                  isNaN(cellStr) &&
+                  !/^\d+$/.test(cellStr) &&
+                  !/^(كود|سعر|خصم|كمية|ملاحظات|م|ت|رقم|بيان|اسم_المنتج|كود_المنتج)$/i.test(cellStr)
+                ) {
+                  rawName = cellStr;
                   break;
                 }
               }
             }
           }
-        }
 
-        let discount = 0;
-        if (row[discIdx] !== undefined && row[discIdx] !== null) {
-          discount = parseFloat(String(row[discIdx]).replace(/[^\d.]/g, '')) || 0;
-        }
+          const lowerName = rawName.toLowerCase();
+          // Skip header row if caught in data loop
+          if (
+            !rawName ||
+            lowerName === 'كود' || lowerName === 'اسم' || lowerName === 'اسم المنتج' ||
+            lowerName === 'كود_المنتج' || lowerName === 'اسم_المنتج' || lowerName === 'البيان' ||
+            lowerName === 'المواصفات' || lowerName === 'وصف المنتج' || lowerName === 'name' ||
+            lowerName === 'product name' || lowerName === 'code' || lowerName === 'sku'
+          ) {
+            continue;
+          }
 
-        let stock = 10;
-        if (row[stockIdx] !== undefined && row[stockIdx] !== null) {
-          stock = parseInt(String(row[stockIdx]).replace(/[^\d]/g, '')) || 10;
-        }
+          const code = rawCode.length > 0 ? rawCode : `PRD-${importedItems.length + 1}-${Date.now().toString().slice(-4)}`;
 
-        const terms = (row[termsIdx] !== undefined && row[termsIdx] !== null) ? String(row[termsIdx]).trim() : '';
+          let priceVal = 0;
+          if (row[priceIdx] !== undefined && row[priceIdx] !== null) {
+            priceVal = parseNumber(row[priceIdx]);
+          }
 
-        if (name && name.trim() !== '') {
-          importedItems.push({ code, name, unit_price: priceVal, category, stock_quantity: stock });
+          // Fallback price search across all cells in the row if priceVal is 0
+          if (priceVal === 0) {
+            for (let colVal of row) {
+              if (colVal !== undefined && colVal !== null) {
+                const p = parseNumber(colVal);
+                if (p > 0 && p !== parseInt(code)) {
+                  priceVal = p;
+                  break;
+                }
+              }
+            }
+          }
+
+          let discount = 0;
+          if (row[discIdx] !== undefined && row[discIdx] !== null) {
+            discount = parseNumber(row[discIdx]);
+          }
+
+          let stock = 10;
+          if (row[stockIdx] !== undefined && row[stockIdx] !== null) {
+            const parsedStock = parseNumber(row[stockIdx]);
+            if (parsedStock > 0) stock = parseInt(parsedStock);
+          }
+
+          const terms = (row[termsIdx] !== undefined && row[termsIdx] !== null) ? String(row[termsIdx]).trim() : '';
+
+          importedItems.push({ code, name: rawName, unit_price: priceVal, category, stock_quantity: stock });
 
           if (discount > 0) {
             familyDiscountRules.push({
@@ -347,9 +381,9 @@ router.post('/upload-pricelist', authenticateToken, upload.single('file'), async
         if (matches) {
           const code = matches[1] ? matches[1].trim() : `PDF-${counter++}`;
           const name = matches[2] ? matches[2].trim() : '';
-          const price = parseFloat(matches[3].replace(/,/g, ''));
+          const price = parseNumber(matches[3]);
 
-          if (name.length > 2 && !isNaN(price) && price > 0) {
+          if (name.length > 2 && price > 0) {
             importedItems.push({
               code: code.toUpperCase(),
               name,
